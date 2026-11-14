@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
   /* Intentional palette — warm, serious, high contrast for Forge */
@@ -16,15 +18,6 @@
   --destructive: #9b2c2c;
   --ring: #1c3d5a;
   --radius: 6px;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-primary: var(--primary);
-  --color-accent: var(--accent);
-  --font-sans: var(--font-dm-sans);
-  --font-mono: var(--font-jetbrains-mono);
 }
 
 @media (prefers-color-scheme: dark) {

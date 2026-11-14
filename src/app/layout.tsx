@@ -34,7 +34,7 @@ export default function RootLayout({
       lang="en"
       className={`${dmSans.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--foreground)]">
+      <body className="min-h-full flex flex-col bg-background text-foreground">
         <ErrorBoundary>{children}</ErrorBoundary>
       </body>
     </html>
