@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { challengeId, answer, timeSpent } = validationResult.data;
+    const { challengeId, answer, timeSpent, idempotencyKey } = validationResult.data;
 
     // Verify challenge exists
     const { data: challenge, error: challengeError } = await supabase
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
     // Calculate score (simplified - in production, use actual grading logic)
     const score = Math.floor(Math.random() * 40) + 60; // 60-100 range for demo
 
-    // Record attempt
+    // Record attempt with idempotency
     const { data: attempt, error: attemptError } = await supabase
       .from("challenge_attempts")
       .insert({
@@ -127,6 +127,9 @@ export async function POST(request: NextRequest) {
         score,
         time_spent_seconds: timeSpent,
         status: "completed",
+        idempotency_key: idempotencyKey,
+        ip_address: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown",
+        user_agent: request.headers.get("user-agent") || "unknown",
       })
       .select()
       .single();
