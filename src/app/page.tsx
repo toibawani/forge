@@ -11,7 +11,7 @@ export default function Home() {
               Forge
             </span>
           </div>
-          <nav className="flex items-center gap-6 text-sm">
+          <nav className="flex items-center gap-6 text-sm" aria-label="Main navigation">
             <Link
               href="#how"
               className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
@@ -42,9 +42,9 @@ export default function Home() {
 
       {/* Hero */}
       <main className="flex-1">
-        <section className="mx-auto max-w-5xl px-6 pt-20 pb-24">
+        <section className="mx-auto max-w-5xl px-6 pt-20 pb-24" aria-labelledby="hero-heading">
           <div className="max-w-2xl">
-            <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight leading-tight text-[var(--foreground)]">
+            <h1 id="hero-heading" className="text-4xl sm:text-5xl font-semibold tracking-tight leading-tight text-[var(--foreground)]">
               Prove what you can do.
               <br />
               Every day.
@@ -72,9 +72,9 @@ export default function Home() {
         </section>
 
         {/* Problem */}
-        <section className="border-t border-[var(--card-border)] bg-[var(--card)]">
+        <section className="border-t border-[var(--card-border)] bg-[var(--card)]" aria-labelledby="problem-heading">
           <div className="mx-auto max-w-5xl px-6 py-20">
-            <h2 className="text-2xl font-semibold tracking-tight">
+            <h2 id="problem-heading" className="text-2xl font-semibold tracking-tight">
               Resumes are no longer trustworthy
             </h2>
             <p className="mt-4 max-w-2xl text-[var(--muted-foreground)] leading-relaxed">
@@ -90,9 +90,9 @@ export default function Home() {
         </section>
 
         {/* How it works */}
-        <section id="how" className="border-t border-[var(--card-border)]">
+        <section id="how" className="border-t border-[var(--card-border)]" aria-labelledby="how-heading">
           <div className="mx-auto max-w-5xl px-6 py-20">
-            <h2 className="text-2xl font-semibold tracking-tight">
+            <h2 id="how-heading" className="text-2xl font-semibold tracking-tight">
               How daily practice becomes a hiring signal
             </h2>
             <div className="mt-12 grid gap-10 sm:grid-cols-3">
@@ -125,9 +125,9 @@ export default function Home() {
         </section>
 
         {/* Recruiters */}
-        <section id="recruiters" className="border-t border-[var(--card-border)] bg-[var(--card)]">
+        <section id="recruiters" className="border-t border-[var(--card-border)] bg-[var(--card)]" aria-labelledby="recruiters-heading">
           <div className="mx-auto max-w-5xl px-6 py-20">
-            <h2 className="text-2xl font-semibold tracking-tight">
+            <h2 id="recruiters-heading" className="text-2xl font-semibold tracking-tight">
               Built for the people who hire
             </h2>
             <p className="mt-4 max-w-2xl text-[var(--muted-foreground)] leading-relaxed">
@@ -135,17 +135,17 @@ export default function Home() {
               consistency, and recent activity. See people who keep practicing even
               when they are not actively looking for a job.
             </p>
-            <ul className="mt-8 space-y-3 text-[var(--muted-foreground)]">
+            <ul className="mt-8 space-y-3 text-[var(--muted-foreground)]" role="list">
               <li className="flex gap-3">
-                <span className="text-[var(--accent)]">→</span>
+                <span className="text-[var(--accent)]" aria-hidden="true">→</span>
                 Filter by skill, difficulty, and consistency over time
               </li>
               <li className="flex gap-3">
-                <span className="text-[var(--accent)]">→</span>
+                <span className="text-[var(--accent)]" aria-hidden="true">→</span>
                 See real attempts instead of claimed years of experience
               </li>
               <li className="flex gap-3">
-                <span className="text-[var(--accent)]">→</span>
+                <span className="text-[var(--accent)]" aria-hidden="true">→</span>
                 Reach people who are quietly improving, not just applying
               </li>
             </ul>
@@ -153,9 +153,9 @@ export default function Home() {
         </section>
 
         {/* CTA */}
-        <section className="border-t border-[var(--card-border)]">
+        <section className="border-t border-[var(--card-border)]" aria-labelledby="cta-heading">
           <div className="mx-auto max-w-5xl px-6 py-20 text-center">
-            <h2 className="text-2xl font-semibold tracking-tight">
+            <h2 id="cta-heading" className="text-2xl font-semibold tracking-tight">
               Start building your proof today
             </h2>
             <p className="mt-4 text-[var(--muted-foreground)]">
@@ -180,14 +180,14 @@ export default function Home() {
               Daily skill proof for people who want to be hired for what they can do.
             </p>
           </div>
-          <div className="flex gap-6 text-sm text-[var(--muted-foreground)]">
+          <nav className="flex gap-6 text-sm text-[var(--muted-foreground)]" aria-label="Footer navigation">
             <Link href="/privacy" className="hover:text-[var(--foreground)]">
               Privacy
             </Link>
             <Link href="/terms" className="hover:text-[var(--foreground)]">
               Terms
             </Link>
-          </div>
+          </nav>
         </div>
       </footer>
     </div>

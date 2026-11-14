@@ -3,14 +3,14 @@ import Link from "next/link";
 export default function PrivacyPage() {
   return (
     <div className="min-h-screen bg-[var(--background)]">
-      <div className="mx-auto max-w-3xl px-6 py-16">
+      <div className="mx-auto max-w-3xl px-6 py-16" aria-labelledby="privacy-heading">
         <Link
           href="/"
           className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
         >
           ← Back to Forge
         </Link>
-        <h1 className="mt-8 text-3xl font-semibold tracking-tight">Privacy Policy</h1>
+        <h1 id="privacy-heading" className="mt-8 text-3xl font-semibold tracking-tight">Privacy Policy</h1>
         <p className="mt-2 text-sm text-[var(--muted)]">Last updated: November 2026</p>
 
         <div className="mt-10 space-y-6 text-[var(--muted-foreground)] leading-relaxed">
