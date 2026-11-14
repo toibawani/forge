@@ -46,7 +46,7 @@ They can search for consistent, demonstrated skill instead of claims.
 |----------------|---------------------------------------------|
 | Framework      | Next.js (App Router) + TypeScript           |
 | Styling        | Tailwind CSS with custom design tokens      |
-| Database & Auth| Supabase (Postgres + Auth + Row Level Security) — planned |
+| Database & Auth| Supabase (Postgres + Auth + Row Level Security) |
 | Validation     | Zod                                         |
 | Fonts          | DM Sans + JetBrains Mono                    |
 
@@ -100,14 +100,24 @@ You will see the landing page. Auth and challenges are the next layers to be bui
 - Privacy Policy and Terms of Service pages
 - Project structure, `.gitignore`, `.env.example`
 - Git repository with conventional commits
+- Supabase client configuration (server and browser)
+- Database schema with Row Level Security on all tables
+- Authentication API endpoints (signup, login, logout) with rate limiting
+- Profile API with authorization checks
+- Challenges API with validation and authorization
+- Error boundary and skeleton loader components
+- Security headers (CSP, HSTS, X-Frame-Options, etc.)
+- Zod validation schemas for all API inputs
+- Structured logging infrastructure
+- Accessibility improvements (ARIA labels, semantic HTML)
 
 **Next (priority order)**
-1. Supabase project + database schema with RLS on every table
-2. Authentication (email + magic link) with secure session handling
-3. Challenge engine and attempt recording
-4. Personal dashboard (streaks, progress, skill history)
+1. Set up Supabase project and run schema.sql
+2. Frontend authentication pages (login, signup)
+3. Personal dashboard (streaks, progress, skill history)
+4. Challenge display and submission UI
 5. Basic recruiter search and filters
-6. Full security and reliability audit against the production checklist
+6. Additional security hardening and testing
 
 ## Project structure
 
@@ -119,9 +129,23 @@ forge/
 │   │   ├── layout.tsx        # Root layout + fonts
 │   │   ├── globals.css       # Design tokens
 │   │   ├── privacy/          # Privacy Policy
-│   │   └── terms/            # Terms of Service
-│   ├── components/           # Shared UI (to be expanded)
+│   │   ├── terms/            # Terms of Service
+│   │   ├── api/              # API routes
+│   │   │   ├── auth/         # Authentication endpoints
+│   │   │   ├── challenges/   # Challenge endpoints
+│   │   │   └── profile/      # Profile endpoints
+│   │   └── middleware.ts     # Auth middleware
+│   ├── components/           # Shared UI components
+│   │   ├── ErrorBoundary.tsx
+│   │   ├── Skeleton.tsx
+│   │   └── ErrorState.tsx
 │   └── lib/                  # Utilities and clients
+│       ├── supabase/         # Supabase clients
+│       ├── validations.ts    # Zod schemas
+│       ├── rate-limit.ts     # Rate limiting
+│       └── logger.ts         # Logging
+├── supabase/
+│   └── schema.sql            # Database schema with RLS
 ├── public/
 ├── .env.example
 ├── .gitignore
