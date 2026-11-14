@@ -101,23 +101,31 @@ You will see the landing page. Auth and challenges are the next layers to be bui
 - Project structure, `.gitignore`, `.env.example`
 - Git repository with conventional commits
 - Supabase client configuration (server and browser)
-- Database schema with Row Level Security on all tables
+- Enhanced database schema with role-based access control, recruiter pipelines, audit logging, profile views
 - Authentication API endpoints (signup, login, logout) with rate limiting
-- Profile API with authorization checks
-- Challenges API with validation and authorization
+- Profile API with authorization checks and streak data
+- Challenges API with validation, authorization, and idempotency
+- Recruiter search API with filtering by skills, difficulty, streak, score
+- Talent pipeline management API (create pipelines, add candidates, stage tracking)
+- Audit logging system for all recruiter actions
+- Role-based access control (practitioner, recruiter, admin)
 - Error boundary and skeleton loader components
 - Security headers (CSP, HSTS, X-Frame-Options, etc.)
 - Zod validation schemas for all API inputs
 - Structured logging infrastructure
 - Accessibility improvements (ARIA labels, semantic HTML)
+- Practitioner and recruiter dashboard pages
 
 **Next (priority order)**
-1. Set up Supabase project and run schema.sql
-2. Frontend authentication pages (login, signup)
-3. Personal dashboard (streaks, progress, skill history)
+1. Set up Supabase project and run enhanced schema.sql
+2. Frontend authentication pages (login, signup with role selection)
+3. Connect dashboard to real data
 4. Challenge display and submission UI
-5. Basic recruiter search and filters
-6. Additional security hardening and testing
+5. Candidate comparison view
+6. Activity heatmap visualization
+7. Skill timeline visualization
+8. Data export functionality
+9. Additional security hardening and testing
 
 ## Project structure
 
