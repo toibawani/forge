@@ -1,6 +1,45 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { CardSkeleton } from "@/components/Skeleton";
 
 export default function RecruiterDashboardPage() {
+  const [loading, setLoading] = useState(true);
+  const [pipelineCount, setPipelineCount] = useState(0);
+  const [savedCount, setSavedCount] = useState(0);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        if (user) {
+          const { count: pipelineCountData } = await supabase
+            .from("recruiter_pipelines")
+            .select("*", { count: "exact", head: true })
+            .eq("recruiter_id", user.id);
+
+          const { count: candidateCountData } = await supabase
+            .from("pipeline_candidates")
+            .select("*", { count: "exact", head: true })
+            .eq("recruiter_id", user.id);
+
+          setPipelineCount(pipelineCountData || 0);
+          setSavedCount(candidateCountData || 0);
+        }
+      } catch (error) {
+        console.error("Failed to fetch recruiter dashboard data", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchData();
+  }, []);
+
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-7xl px-6 py-12">
@@ -55,18 +94,32 @@ export default function RecruiterDashboardPage() {
                 <h2 className="text-lg font-medium">Your Pipelines</h2>
                 <button className="text-sm text-primary hover:opacity-90">+ New</button>
               </div>
-              <div className="space-y-3">
-                <div className="text-sm text-muted-foreground text-center py-4">
-                  No pipelines yet
+              {loading ? (
+                <CardSkeleton />
+              ) : (
+                <div className="space-y-3">
+                  {pipelineCount === 0 ? (
+                    <div className="text-sm text-muted-foreground text-center py-4">
+                      No pipelines yet
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      {pipelineCount} pipeline{pipelineCount !== 1 ? "s" : ""}
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg p-6">
               <h2 className="text-lg font-medium mb-4">Saved Candidates</h2>
-              <div className="text-sm text-muted-foreground text-center py-4">
-                0 candidates saved
-              </div>
+              {loading ? (
+                <CardSkeleton />
+              ) : (
+                <div className="text-sm text-muted-foreground text-center py-4">
+                  {savedCount} candidate{savedCount !== 1 ? "s" : ""} saved
+                </div>
+              )}
             </div>
           </div>
         </div>
