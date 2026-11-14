@@ -34,7 +34,7 @@ export default function DashboardPage() {
             .select("*", { count: "exact", head: true })
             .eq("user_id", user.id);
 
-          setStreak(profile?.streaks?.current_streak || 0);
+          setStreak(profile?.streaks?.[0]?.current_streak || 0);
           setViews(profile?.profile_views_count || 0);
           setAttempts(count || 0);
         }
