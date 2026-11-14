@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { email, password } = validationResult.data;
+    const { email, password, role } = validationResult.data;
 
     const supabase = createClient();
 
@@ -49,6 +49,9 @@ export async function POST(request: NextRequest) {
       password,
       options: {
         emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+        data: {
+          role,
+        },
       },
     });
 
