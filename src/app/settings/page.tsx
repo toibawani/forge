@@ -1,97 +1,83 @@
-import Link from "next/link";
+import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { getServerUser } from "@/lib/supabase/server";
+import { CONSENT_ITEMS, POLICY_VERSION } from "@/lib/consent";
+import { SettingsClient } from "./SettingsClient";
 
-export default function SettingsPage() {
+export const metadata: Metadata = {
+  title: "Settings — Forge",
+  description: "Your profile, consent choices, data export and account deletion.",
+};
+
+export const dynamic = "force-dynamic";
+
+export default async function SettingsPage() {
+  const session = await getServerUser();
+  if (!session) redirect("/login?next=/settings");
+
+  const { supabase, user } = session;
+
+  const [profileResult, consentsResult, deletionResult, requestsResult] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("display_name, headline, bio, skills, visibility, allow_recruiter_contact, company_name, created_at")
+      .eq("id", user.id)
+      .maybeSingle(),
+    supabase
+      .from("user_consents")
+      .select("purpose, granted, policy_version, granted_at, withdrawn_at")
+      .eq("user_id", user.id),
+    supabase
+      .from("account_deletions")
+      .select("id, mode, status, requested_at, scheduled_for")
+      .eq("user_id", user.id)
+      .eq("status", "scheduled")
+      .maybeSingle(),
+    supabase
+      .from("data_requests")
+      .select("id, kind, status, created_at")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(5),
+  ]);
+
+  const profile = profileResult.data;
+
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-3xl px-6 py-12">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-semibold tracking-tight">Settings</h1>
-          <Link
-            href="/dashboard"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            ← Back to Dashboard
-          </Link>
-        </div>
-
-        <div className="space-y-6">
-          <div className="border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg p-6">
-            <h2 className="text-lg font-medium mb-4">Profile Visibility</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium">Who can see your profile?</label>
-                <select className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-background px-3 py-2 text-sm">
-                  <option value="private">Private - Only you</option>
-                  <option value="recruiters_only">Recruiters Only</option>
-                  <option value="public">Public - Everyone</option>
-                </select>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Recruiter-only allows verified recruiters to find you, but not the general public.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <label className="text-sm font-medium">Allow recruiter contact</label>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Recruiters can send you messages
-                  </p>
-                </div>
-                <button className="relative inline-flex h-6 w-11 items-center rounded-full bg-primary transition-colors">
-                  <span className="translate-x-6 inline-block h-4 w-4 transform rounded-full bg-white transition-transform" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg p-6">
-            <h2 className="text-lg font-medium mb-4">Profile Information</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium">Display Name</label>
-                <input
-                  type="text"
-                  placeholder="Your name"
-                  className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-background px-3 py-2 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium">Bio</label>
-                <textarea
-                  placeholder="Tell recruiters about yourself"
-                  rows={3}
-                  className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-background px-3 py-2 text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium">Skills</label>
-                <input
-                  type="text"
-                  placeholder="react, python, design (comma-separated)"
-                  className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-background px-3 py-2 text-sm"
-                />
-              </div>
-            </div>
-            <button className="mt-6 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity">
-              Save Changes
-            </button>
-          </div>
-
-          <div className="border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg p-6">
-            <h2 className="text-lg font-medium mb-4">Data</h2>
-            <div className="space-y-4">
-              <button className="w-full text-left rounded-lg border border-gray-200 dark:border-gray-700 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                Export my data
-              </button>
-              <button className="w-full text-left rounded-lg border border-destructive text-destructive px-4 py-3 text-sm hover:bg-destructive/10 transition-colors">
-                Delete my account
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <SettingsClient
+      email={user.email ?? ""}
+      memberSince={profile?.created_at ?? null}
+      initialProfile={{
+        displayName: profile?.display_name ?? "",
+        headline: profile?.headline ?? "",
+        bio: profile?.bio ?? "",
+        skills: (profile?.skills ?? []).join(", "),
+        visibility: (profile?.visibility ?? "private") as "private" | "recruiters_only" | "public",
+        allowRecruiterContact: profile?.allow_recruiter_contact ?? false,
+        companyName: profile?.company_name ?? "",
+      }}
+      consentPurposes={CONSENT_ITEMS}
+      policyVersion={POLICY_VERSION}
+      consents={(consentsResult.data ?? []).map((row) => ({
+        purpose: row.purpose as string,
+        granted: Boolean(row.granted),
+        grantedAt: row.granted_at as string | null,
+        withdrawnAt: row.withdrawn_at as string | null,
+      }))}
+      scheduledDeletion={
+        deletionResult.data
+          ? {
+              scheduledFor: deletionResult.data.scheduled_for as string,
+              mode: deletionResult.data.mode as string,
+            }
+          : null
+      }
+      recentRequests={(requestsResult.data ?? []).map((row) => ({
+        id: row.id as string,
+        kind: row.kind as string,
+        status: row.status as string,
+        createdAt: row.created_at as string,
+      }))}
+    />
   );
 }

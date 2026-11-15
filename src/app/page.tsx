@@ -1,6 +1,12 @@
 import Link from "next/link";
 
-export default function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ deleted?: string }>;
+}) {
+  const { deleted } = await searchParams;
+
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
@@ -42,6 +48,14 @@ export default function Home() {
 
       {/* Hero */}
       <main className="flex-1">
+        {deleted === "1" ? (
+          <div className="border-b border-success/30 bg-success/[0.06]" role="status">
+            <div className="mx-auto max-w-5xl px-6 py-3 text-sm text-foreground">
+              Your account and practice record have been erased. Only an anonymous record that the
+              deletion happened remains.
+            </div>
+          </div>
+        ) : null}
         <section className="mx-auto max-w-5xl px-6 pt-20 pb-24" aria-labelledby="hero-heading">
           <div className="max-w-2xl">
             <h1 id="hero-heading" className="text-4xl sm:text-5xl font-semibold tracking-tight leading-tight text-foreground">
@@ -180,9 +194,12 @@ export default function Home() {
               Daily skill proof for people who want to be hired for what they can do.
             </p>
           </div>
-          <nav className="flex gap-6 text-sm text-muted-foreground" aria-label="Footer navigation">
+          <nav className="flex flex-wrap gap-6 text-sm text-muted-foreground" aria-label="Footer navigation">
             <Link href="/privacy" className="hover:text-foreground">
               Privacy
+            </Link>
+            <Link href="/privacy/hindi" className="hover:text-foreground">
+              गोपनीयता नीति
             </Link>
             <Link href="/terms" className="hover:text-foreground">
               Terms
