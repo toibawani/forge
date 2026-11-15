@@ -17,17 +17,23 @@ export default function RecruiterDashboardPage() {
         const { data: { user } } = await supabase.auth.getUser();
 
         if (user) {
-          const { count: pipelineCountData } = await supabase
+          const { data: pipelines } = await supabase
             .from("recruiter_pipelines")
-            .select("*", { count: "exact", head: true })
+            .select("id")
             .eq("recruiter_id", user.id);
 
-          const { count: candidateCountData } = await supabase
-            .from("pipeline_candidates")
-            .select("*", { count: "exact", head: true })
-            .eq("recruiter_id", user.id);
+          const pipelineIds = (pipelines ?? []).map((pipeline) => pipeline.id as string);
 
-          setPipelineCount(pipelineCountData || 0);
+          // pipeline_candidates has no recruiter_id column: scope by the
+          // caller's own pipeline ids (RLS enforces the same thing again).
+          const { count: candidateCountData } = pipelineIds.length
+            ? await supabase
+                .from("pipeline_candidates")
+                .select("*", { count: "exact", head: true })
+                .in("pipeline_id", pipelineIds)
+            : { count: 0 };
+
+          setPipelineCount(pipelineIds.length);
           setSavedCount(candidateCountData || 0);
         }
       } catch (error) {
