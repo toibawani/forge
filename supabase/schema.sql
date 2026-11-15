@@ -939,3 +939,64 @@ $$;
 
 revoke all on function public.purge_expired_data() from public;
 grant execute on function public.purge_expired_data() to service_role;
+
+-- ---------------------------------------------------------------------
+-- Practice sessions
+-- A session is opened before the user sees a challenge and closed when the
+-- attempt is written. Elapsed time is measured by the server from
+-- started_at, so a client cannot claim it took ten minutes (or forty
+-- seconds) to finish. Sessions expire so an abandoned tab cannot be
+-- submitted days later.
+-- ---------------------------------------------------------------------
+
+create table if not exists public.practice_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  challenge_id uuid not null references public.challenges (id) on delete cascade,
+  started_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '2 hours',
+  submitted_attempt_id uuid references public.challenge_attempts (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_practice_sessions_user
+  on public.practice_sessions (user_id, started_at desc);
+create index if not exists idx_practice_sessions_open
+  on public.practice_sessions (user_id, challenge_id)
+  where submitted_attempt_id is null;
+
+alter table public.practice_sessions enable row level security;
+
+drop policy if exists "sessions_select_own" on public.practice_sessions;
+create policy "sessions_select_own" on public.practice_sessions
+  for select using (auth.uid() = user_id);
+
+drop policy if exists "sessions_insert_own" on public.practice_sessions;
+create policy "sessions_insert_own" on public.practice_sessions
+  for insert with check (auth.uid() = user_id);
+
+-- Sessions are closed by the attempt trigger, not by the client.
+revoke update, delete on public.practice_sessions from authenticated, anon;
+
+create or replace function public.close_practice_session()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.practice_sessions
+  set submitted_attempt_id = new.id
+  where user_id = new.user_id
+    and challenge_id = new.challenge_id
+    and submitted_attempt_id is null
+    and expires_at > now();
+
+  return new;
+end;
+$$;
+
+drop trigger if exists on_attempt_close_session on public.challenge_attempts;
+create trigger on_attempt_close_session
+  after insert on public.challenge_attempts
+  for each row execute function public.close_practice_session();

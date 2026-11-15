@@ -34,12 +34,18 @@ export const GET = apiRoute(
   { auth: "public" }
 );
 
+const MAX_SESSION_SECONDS = 7200;
+
 /**
  * Records a practice attempt.
  *
- * The score is computed server-side from the challenge rubric — the client
- * cannot submit its own score — and the attempt is immutable once written.
- * Idempotency keys make retries safe on flaky networks.
+ * Three things the client cannot influence:
+ *   * the score — computed here from the challenge rubric;
+ *   * the duration — derived from the server-written session, not the body;
+ *   * the record — attempts are immutable after insert.
+ *
+ * Idempotency keys make a network retry safe: the same key returns the
+ * attempt that already exists instead of writing a second one.
  */
 export const POST = apiRoute(async ({ request, supabase, user, requestId, profile }) => {
   const ipHash = hashIp(requestIp(request.headers));
@@ -48,11 +54,51 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
     return fail(429, "rate_limited", "You have logged a lot of practice today. Come back later.");
   }
 
+  if (!profile.consent_at) {
+    return fail(
+      403,
+      "consent_required",
+      "Record consent to store your practice record in Settings before practising."
+    );
+  }
+
   const input = await readJson(request, challengeAttemptSchema);
+
+  const { data: session } = await supabase
+    .from("practice_sessions")
+    .select("id, challenge_id, started_at, expires_at, submitted_attempt_id")
+    .eq("id", input.sessionId)
+    .maybeSingle();
+
+  // RLS already scopes this to the caller: a guessed id resolves to nothing.
+  if (!session) {
+    return fail(404, "session_not_found", "Start a practice session for this challenge first.");
+  }
+
+  if (session.challenge_id !== input.challengeId) {
+    return fail(400, "session_mismatch", "That session belongs to a different challenge.");
+  }
+
+  if (session.submitted_attempt_id) {
+    return fail(409, "already_submitted", "This session was already submitted.");
+  }
+
+  const startedAt = new Date(session.started_at).getTime();
+  const expiresAt = new Date(session.expires_at).getTime();
+  const now = Date.now();
+
+  if (now > expiresAt) {
+    return fail(410, "session_expired", "That session expired. Start the challenge again.");
+  }
+
+  const elapsedSeconds = Math.min(
+    MAX_SESSION_SECONDS,
+    Math.max(1, Math.round((now - startedAt) / 1000))
+  );
 
   const { data: challenge, error: challengeError } = await supabase
     .from("challenges")
-    .select("id, category, rubric, title, is_active")
+    .select("id, category, rubric, is_active")
     .eq("id", input.challengeId)
     .eq("is_active", true)
     .maybeSingle();
@@ -77,12 +123,12 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
         scoring: breakdown,
       },
       score: breakdown.score,
-      time_spent_seconds: input.timeSpent,
+      time_spent_seconds: elapsedSeconds,
       status: "completed",
       idempotency_key: input.idempotencyKey ?? null,
       ip_hash: ipHash,
     })
-    .select("id, score, practice_date, created_at")
+    .select("id, score, practice_date, created_at, time_spent_seconds")
     .single();
 
   if (insertError) {
@@ -90,7 +136,7 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
     if (insertError.code === "23505" && input.idempotencyKey) {
       const { data: existing } = await supabase
         .from("challenge_attempts")
-        .select("id, score, practice_date, created_at")
+        .select("id, score, practice_date, created_at, time_spent_seconds")
         .eq("idempotency_key", input.idempotencyKey)
         .eq("user_id", user.id)
         .maybeSingle();
@@ -100,9 +146,22 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
       }
     }
 
+    // A closed session loses the race: report it as already submitted.
+    if (insertError.code === "23505") {
+      return fail(409, "already_submitted", "This session was already submitted.");
+    }
+
     logger.error("Attempt insert failed", { code: insertError.code }, user.id, requestId);
     return fail(500, "attempt_failed", "We could not save that attempt. Try again.");
   }
+
+  // The streak trigger has just run; read it back so the result page can show
+  // the new state without a second round trip.
+  const { data: streak } = await supabase
+    .from("streaks")
+    .select("current_streak, longest_streak, total_practice_days, last_practice_date")
+    .eq("user_id", user.id)
+    .maybeSingle();
 
   await logAuditEvent(supabase, user.id, {
     action: "practice_recorded",
@@ -113,5 +172,5 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
     actorRole: profile.role,
   });
 
-  return created({ attempt, scoring: breakdown });
+  return created({ attempt, scoring: breakdown, streak: streak ?? null });
 });

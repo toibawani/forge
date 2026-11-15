@@ -20,6 +20,7 @@ declare
   bob uuid := '00000000-0000-4000-8000-000000000002';
   rec uuid := '00000000-0000-4000-8000-000000000003';
   attempt uuid;
+  bob_session uuid;
   n integer;
 begin
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
@@ -36,6 +37,11 @@ begin
   select alice, c.id, '{"answer":"x"}'::jsonb, 82, 300
   from public.challenges c limit 1
   returning id into attempt;
+
+  -- Bob has an open practice session, created with owner rights.
+  insert into public.practice_sessions (user_id, challenge_id)
+  select bob, c.id from public.challenges c limit 1
+  returning id into bob_session;
 
   -- 1. Alice cannot read Bob's profile.
   perform set_config('request.jwt.claims', json_build_object('sub', alice, 'role', 'authenticated')::text, true);
@@ -114,6 +120,28 @@ begin
   if n <> 0 then
     raise exception 'IDOR: alice can read deletion requests she does not own';
   end if;
+
+  -- 8b. Practice sessions are private, openable only for yourself, and their
+  --     timestamps are not writable (server-measured time is the point).
+  select count(*) into n from public.practice_sessions where user_id = bob;
+  if n <> 0 then
+    raise exception 'IDOR: alice can read bob''s practice sessions';
+  end if;
+
+  begin
+    insert into public.practice_sessions (user_id, challenge_id)
+    select bob, c.id from public.challenges c limit 1;
+    raise exception 'IDOR: alice opened a practice session for bob';
+  exception
+    when insufficient_privilege or check_violation then null;
+  end;
+
+  begin
+    update public.practice_sessions set started_at = now() - interval '1 hour' where user_id = alice;
+    raise exception 'TAMPER: alice rewrote a practice session timestamp';
+  exception
+    when insufficient_privilege then null;
+  end;
 
   -- 9. Bob (recruiter_discovery not granted, private profile) is invisible in
   --    the recruiter view.

@@ -69,18 +69,19 @@ export const resetPasswordSchema = z
 // Practice
 // ---------------------------------------------------------------------
 
+export const startPracticeSessionSchema = z.object({
+  challengeId: z.string().uuid("Invalid challenge ID"),
+});
+
 export const challengeAttemptSchema = z.object({
   challengeId: z.string().uuid("Invalid challenge ID"),
+  /** Opened before the prompt was shown; proves how long the attempt took. */
+  sessionId: z.string().uuid("Start a practice session first"),
   answer: z
     .string()
     .trim()
     .min(1, "Add your answer before submitting")
     .max(20000, "That answer is too long"),
-  timeSpent: z
-    .number()
-    .int()
-    .min(1, "Time spent must be at least 1 second")
-    .max(7200, "That session is too long"),
   idempotencyKey: z.string().min(8).max(128).optional(),
 });
 
@@ -205,6 +206,7 @@ export const breachEventSchema = z.object({
 
 export type SignUpInput = z.infer<typeof signUpSchema>;
 export type SignInInput = z.infer<typeof signInSchema>;
+export type StartPracticeSessionInput = z.infer<typeof startPracticeSessionSchema>;
 export type ChallengeAttemptInput = z.infer<typeof challengeAttemptSchema>;
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 export type RecruiterSearchInput = z.infer<typeof recruiterSearchSchema>;
