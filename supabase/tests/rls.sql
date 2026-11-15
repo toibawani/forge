@@ -175,6 +175,25 @@ begin
   exception
     when insufficient_privilege or check_violation then null;
   end;
+
+  -- 13. Rate-limit counters are operational state, never readable data.
+  begin
+    select count(*) into n from public.rate_limits;
+    if n > 0 then
+      raise exception 'privacy: authenticated role can read rate-limit keys';
+    end if;
+  exception
+    when insufficient_privilege then null;
+  end;
+
+  -- 14. A client cannot call the limiter directly: arbitrary keys would let
+  --     one caller exhaust another user's budget.
+  begin
+    perform public.consume_rate_limit('test:key', 1, 60);
+    raise exception 'privilege: authenticated role can call consume_rate_limit';
+  exception
+    when insufficient_privilege or undefined_function then null;
+  end;
 end;
 $$;
 

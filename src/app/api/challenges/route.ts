@@ -50,7 +50,7 @@ const MAX_SESSION_SECONDS = 7200;
  */
 export const POST = apiRoute(async ({ request, supabase, user, requestId, profile }) => {
   const ipHash = hashIp(requestIp(request.headers));
-  const rate = rateLimit(`attempt:${user.id}`, 30, 60 * 60 * 1000);
+  const rate = await rateLimit(`attempt:${user.id}`, 30, 60 * 60 * 1000);
   if (!rate.success) {
     return fail(429, "rate_limited", "You have logged a lot of practice today. Come back later.");
   }

@@ -10,7 +10,7 @@ import { startPracticeSessionSchema } from "@/lib/validations";
  * claim a duration. Sessions expire after two hours.
  */
 export const POST = apiRoute(async ({ request, supabase, user, profile }) => {
-  const rate = rateLimit(`session:${user.id}`, 40, 60 * 60 * 1000);
+  const rate = await rateLimit(`session:${user.id}`, 40, 60 * 60 * 1000);
   if (!rate.success) {
     return fail(429, "rate_limited", "You have opened a lot of sessions today. Try again shortly.");
   }

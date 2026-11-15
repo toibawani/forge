@@ -941,6 +941,9 @@ begin
   )
   select count(*) into v_audit from gone;
 
+  -- Rate-limit windows are operational state, not user history.
+  delete from public.rate_limits where window_start < now() - interval '1 day';
+
   return query select v_profiles, v_views, v_audit;
 end;
 $$;
@@ -1008,3 +1011,63 @@ drop trigger if exists on_attempt_close_session on public.challenge_attempts;
 create trigger on_attempt_close_session
   after insert on public.challenge_attempts
   for each row execute function public.close_practice_session();
+
+-- ---------------------------------------------------------------------
+-- Rate limiting
+-- Counters live in the database so every instance shares one budget. The
+-- function is service-role only: a client that could call it with arbitrary
+-- keys could exhaust another user's allowance.
+-- ---------------------------------------------------------------------
+
+create table if not exists public.rate_limits (
+  key text primary key,
+  window_start timestamptz not null,
+  hits integer not null check (hits > 0)
+);
+
+alter table public.rate_limits enable row level security;
+
+create or replace function public.consume_rate_limit(
+  p_key text,
+  p_limit integer,
+  p_window_seconds integer
+)
+returns table (allowed boolean, remaining integer, reset_at timestamptz)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_window_start timestamptz;
+  v_hits integer;
+begin
+  if p_key is null or length(p_key) = 0 or p_limit < 1 or p_window_seconds < 1 then
+    raise exception 'consume_rate_limit: invalid arguments';
+  end if;
+
+  -- Windows are anchored to the epoch so all instances agree on boundaries
+  -- without coordinating.
+  v_window_start :=
+    to_timestamp(floor(extract(epoch from now()) / p_window_seconds) * p_window_seconds);
+
+  insert into public.rate_limits (key, window_start, hits)
+  values (p_key, v_window_start, 1)
+  on conflict (key) do update
+    set hits = case
+                 when public.rate_limits.window_start = excluded.window_start
+                   then public.rate_limits.hits + 1
+                 else 1
+               end,
+        window_start = excluded.window_start
+  returning public.rate_limits.hits into v_hits;
+
+  return query
+    select v_hits <= p_limit,
+           greatest(p_limit - v_hits, 0),
+           v_window_start + make_interval(secs => p_window_seconds);
+end;
+$$;
+
+revoke all on public.rate_limits from anon, authenticated;
+revoke all on function public.consume_rate_limit(text, integer, integer) from public, anon, authenticated;
+grant execute on function public.consume_rate_limit(text, integer, integer) to service_role;

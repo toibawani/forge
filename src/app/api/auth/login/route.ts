@@ -12,7 +12,7 @@ export const POST = apiRoute(
   async ({ request, requestId, supabase }) => {
     const ipHash = hashIp(requestIp(request.headers));
 
-    const rate = rateLimit(`login:${ipHash ?? "anonymous"}`, 10, 5 * 60 * 1000);
+    const rate = await rateLimit(`login:${ipHash ?? "anonymous"}`, 10, 5 * 60 * 1000);
     if (!rate.success) {
       return fail(429, "rate_limited", "Too many sign-in attempts. Wait a few minutes and try again.");
     }

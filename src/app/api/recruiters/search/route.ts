@@ -14,7 +14,7 @@ import { rateLimit } from "@/lib/rate-limit";
 export const GET = apiRoute(
   async ({ request, supabase, user, requestId, profile }) => {
     const ipHash = hashIp(requestIp(request.headers));
-    const rate = rateLimit(`recruiter-search:${user.id}`, 30, 60 * 1000);
+    const rate = await rateLimit(`recruiter-search:${user.id}`, 30, 60 * 1000);
     if (!rate.success) {
       return fail(429, "rate_limited", "Too many searches. Wait a minute.");
     }
