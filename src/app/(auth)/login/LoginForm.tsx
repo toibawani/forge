@@ -112,6 +112,12 @@ export function LoginForm({
           </Field>
         </div>
 
+        <p className="mt-3 text-right text-xs">
+          <Link href="/forgot-password" className="text-muted-foreground underline underline-offset-4 hover:text-foreground">
+            Forgot your password?
+          </Link>
+        </p>
+
         {message ? (
           <div className="mt-5">
             <Alert tone="error">{message}</Alert>

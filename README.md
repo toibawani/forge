@@ -165,6 +165,8 @@ It processes due deletions, records accountability rows, runs retention cleanup,
 ```
 /                        landing
 /login, /signup          auth + itemised consent
+/forgot-password        request a one-time recovery link (no account enumeration)
+/reset-password         set a new password inside the recovery session
 /auth/callback           email confirmation / recovery exchange
 /dashboard               streak, consistency, 14-day activity, recent sessions
 /dashboard/recruiter     candidate search over opted-in records (recruiter/admin)
@@ -178,7 +180,7 @@ It processes due deletions, records accountability rows, runs retention cleanup,
 /privacy, /privacy/hindi policy in English and Hindi
 /terms                   terms of service
 
-POST   /api/auth/signup | login | logout
+POST   /api/auth/signup | login | logout | forgot-password | reset-password
 GET    /api/auth/…       (session cookie based, httpOnly)
 GET    /api/challenges   public catalogue
 POST   /api/challenges   record an attempt (rubric v1, server-scored, server-timed, idempotent)
@@ -261,7 +263,6 @@ docs/decisions.md                       why limits live in Postgres, levels are 
   `/p/[id]` does not increment them yet.
 - **Backups are only as good as the provider setting.** Supabase's PITR/backup window must be
   configured; erasure from backups follows that rotation.
-- **Password reset has no page yet.** `resetPasswordSchema` and the callback exist; the UI does not.
 
 ## Licence
 

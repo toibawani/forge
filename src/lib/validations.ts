@@ -54,11 +54,15 @@ export const forgotPasswordSchema = z.object({
   email: emailField,
 });
 
-export const resetPasswordSchema = z
+/**
+ * Setting a new password happens inside a recovery session established by the
+ * email link (`/auth/callback`), so no reset token travels in the body: the
+ * session cookie is the proof of identity.
+ */
+export const newPasswordSchema = z
   .object({
-    token: z.string().min(1, "Reset token is required"),
     password: passwordRules,
-    confirmPassword: z.string().min(1, "Please confirm your password"),
+    confirmPassword: z.string().min(1, "Confirm your new password"),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords do not match",
