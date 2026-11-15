@@ -39,7 +39,7 @@ begin
 
   -- 1. Alice cannot read Bob's profile.
   perform set_config('request.jwt.claims', json_build_object('sub', alice, 'role', 'authenticated')::text, true);
-  set local role authenticated;
+  execute 'set local role authenticated';
 
   select count(*) into n from public.profiles where id = bob;
   if n <> 0 then
@@ -101,9 +101,9 @@ begin
   end;
 
   -- 8. Alice cannot read another user's consents or deletion requests.
-  reset role;
+  execute 'reset role';
   perform set_config('request.jwt.claims', json_build_object('sub', alice, 'role', 'authenticated')::text, true);
-  set local role authenticated;
+  execute 'set local role authenticated';
 
   select count(*) into n from public.user_consents where user_id = bob;
   if n <> 0 then
@@ -123,9 +123,9 @@ begin
   end if;
 
   -- 10. Recruiter can see recruited-only profile, but not private data.
-  reset role;
+  execute 'reset role';
   perform set_config('request.jwt.claims', json_build_object('sub', rec, 'role', 'authenticated')::text, true);
-  set local role authenticated;
+  execute 'set local role authenticated';
 
   select count(*) into n from public.profile_cards where id = alice;
   if n <> 1 then
