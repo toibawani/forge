@@ -41,7 +41,7 @@ export const GET = apiRoute(
       return fail(400, "invalid_search", "Some filters are not valid.", candidate.error.issues);
     }
 
-    const { skills, minStreak, minAvgScore, limit, offset } = candidate.data;
+    const { skills, minStreak, minAvgScore, category, limit, offset } = candidate.data;
 
     let query = supabase
       .from("profile_cards")
@@ -92,6 +92,16 @@ export const GET = apiRoute(
       };
     });
 
+    if (category) {
+      // Only people who actually practised that skill recently: a declared
+      // interest is not evidence.
+      results = results.filter((candidateRow) =>
+        candidateRow.signals.some(
+          (signal) => signal.category === category && Number(signal.days_30d ?? 0) > 0
+        )
+      );
+    }
+
     if (minAvgScore !== undefined) {
       results = results.filter((candidateRow) => {
         const scores = candidateRow.signals
@@ -112,7 +122,7 @@ export const GET = apiRoute(
     await logAuditEvent(supabase, user.id, {
       action: "recruiter_search",
       resourceType: "profile_cards",
-      details: { filters: { skills, minStreak, minAvgScore }, results: results.length },
+      details: { filters: { skills, minStreak, minAvgScore, category }, results: results.length },
       ipHash,
       actorRole: profile.role,
     });

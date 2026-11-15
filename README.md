@@ -85,6 +85,7 @@ In the Supabase SQL editor, run, in order:
 
 ```bash
 npm run dev
+npm test        # rubric, feedback, levels, selection, recruiter helpers (no database needed)
 ```
 
 ### 3. Verify the security model (required before trusting it)
@@ -166,6 +167,9 @@ It processes due deletions, records accountability rows, runs retention cleanup,
 /login, /signup          auth + itemised consent
 /auth/callback           email confirmation / recovery exchange
 /dashboard               streak, consistency, 14-day activity, recent sessions
+/dashboard/recruiter     candidate search over opted-in records (recruiter/admin)
+/dashboard/recruiter/compare   side-by-side comparison of selected records
+/p/[id]                  shareable practice record: signals, recency, no contact details
 /practice                skill picker, recommendation, catalogue
 /practice/[slug]         focused runner: brief, timer, answer, submit
 /practice/[slug]/result/[attemptId]   score, rubric signals, streak, delta
@@ -222,27 +226,39 @@ src/
 │   ├── feedback.ts                      mentor feedback derived from the answer
 │   ├── progression.ts                   earned levels, trends, milestones
 │   ├── challenges.ts                    catalogue helpers + reasoned recommendation
+│   ├── recruiter.ts                     recency / consistency presentation helpers
+│   └── *.test.ts                       node:test suites for the pure modules
 │   ├── supabase/{server,client,admin}.ts
 │   ├── validations.ts                  Zod schemas
 │   ├── rate-limit.ts, logger.ts, audit-logger.ts
-└── middleware.ts                       session refresh + route redirects
+└── proxy.ts                            session refresh + route redirects (Next 16)
 supabase/
 ├── schema.sql                          canonical schema + RLS
 ├── seed.sql                            challenge catalogue
 └── tests/rls.sql                       cross-user access regression tests
 docs/incident-runbook.md                DPDP breach response
+docs/decisions.md                       why limits live in Postgres, levels are computed, etc.
 ```
 
 ## Known limitations
 
-- **Rate limiting is per-instance in memory.** Move to Redis (or Vercel's WAF rules) before
-  running more than one instance; credential stuffing is the realistic attack.
+- **Rate limiting is shared through Postgres** (`consume_rate_limit`), so it survives multiple
+  instances. It needs `SUPABASE_SERVICE_ROLE_KEY`; without it the app falls back to per-instance
+  counters and logs a warning. The free plan's direct-connection cap is why the limiter reuses the
+  service-role client instead of opening its own pool.
 - **Immediate deletion needs the service role.** Without `SUPABASE_SERVICE_ROLE_KEY` the flow
   returns 503 and offers the 30-day path rather than pretending to delete.
 - **Scoring is rule-based, not semantic.** Rubric v1 measures completeness, structure and
   specificity. It cannot judge whether an argument is *correct*, so a confident wrong answer can
   score well. Peer or expert review is the next layer, not a model pretending to grade.
-- **Recruiter dashboard search UI is not wired** to `/api/recruiters/search` (the API is ready).
+- **No human review yet.** A score is rubric-scored and labelled as such everywhere a recruiter can
+  see it. Nothing carries a "verified practice" badge, because no review exists to justify one.
+- **Pipelines have an API but no full UI.** Pipelines and their candidate counts are listed; creating
+  a pipeline, moving stages and adding candidates is API-only today.
+- **No email delivery.** Confirmation and recovery links are sent by Supabase; weekly summaries and
+  streak warnings are not implemented.
+- **Profile-view counting is not wired.** `profile_views` and `profile_views_count` exist; opening
+  `/p/[id]` does not increment them yet.
 - **Backups are only as good as the provider setting.** Supabase's PITR/backup window must be
   configured; erasure from backups follows that rotation.
 - **Password reset has no page yet.** `resetPasswordSchema` and the callback exist; the UI does not.

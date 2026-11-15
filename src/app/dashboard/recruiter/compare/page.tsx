@@ -1,124 +1,211 @@
-"use client";
-
-import { useState } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getServerUser } from "@/lib/supabase/server";
+import { buttonStyles, eyebrowStyles } from "@/components/ui/styles";
+import { skillLabel } from "@/lib/challenges";
+import { summariseCandidate, type Candidate } from "@/lib/recruiter";
 
-export default function ComparePage() {
-  const [candidateIds, setCandidateIds] = useState<string[]>([]);
+export const metadata: Metadata = {
+  title: "Compare candidates — Forge",
+  robots: { index: false, follow: false },
+};
+
+export const dynamic = "force-dynamic";
+
+export default async function ComparePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ ids?: string | string[] }>;
+}) {
+  const session = await getServerUser();
+  if (!session) redirect("/login?next=/dashboard/recruiter");
+
+  const { supabase, user } = session;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (profile?.role !== "recruiter" && profile?.role !== "admin") {
+    redirect("/dashboard");
+  }
+
+  const raw = (await searchParams).ids;
+  const ids = Array.from(
+    new Set(
+      (Array.isArray(raw) ? raw.join(",") : (raw ?? ""))
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 4);
+
+  if (ids.length < 2) {
+    return (
+      <div className="min-h-screen">
+        <main className="mx-auto w-full max-w-3xl px-6 py-20">
+          <p className={eyebrowStyles}>Compare</p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+            Pick two candidates first.
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Comparison works from real records only. Go back to search, select two to four practitioners,
+            then compare.
+          </p>
+          <Link href="/dashboard/recruiter" className={buttonStyles("primary", "md", "mt-6")}>
+            Back to search
+          </Link>
+        </main>
+      </div>
+    );
+  }
+
+  const [cardsResult, signalsResult] = await Promise.all([
+    supabase
+      .from("profile_cards")
+      .select(
+        "id, display_name, headline, bio, skills, visibility, current_streak, longest_streak, total_practice_days, last_practice_date"
+      )
+      .in("id", ids),
+    supabase
+      .from("skill_signals")
+      .select(
+        "user_id, category, total_attempts, attempts_30d, days_30d, avg_score_30d, avg_score_90d, best_score, strong_days_90d, last_attempt_at"
+      )
+      .in("user_id", ids),
+  ]);
+
+  const cards = (cardsResult.data ?? []) as Array<Candidate>;
+  const signals = signalsResult.data ?? [];
+
+  const candidates: Array<Candidate & { summary: ReturnType<typeof summariseCandidate> }> = cards
+    .map((card) => ({
+      ...card,
+      signals: signals
+        .filter((signal) => signal.user_id === card.id)
+        .map((signal) => ({
+          category: signal.category as string,
+          total_attempts: signal.total_attempts as number | null,
+          attempts_30d: signal.attempts_30d as number | null,
+          days_30d: signal.days_30d as number | null,
+          avg_score_30d: signal.avg_score_30d as number | null,
+          avg_score_90d: signal.avg_score_90d as number | null,
+          best_score: signal.best_score as number | null,
+          strong_days_90d: signal.strong_days_90d as number | null,
+          last_attempt_at: signal.last_attempt_at as string | null,
+        })),
+    }))
+    .map((candidate) => ({ ...candidate, summary: summariseCandidate(candidate) }))
+    .sort((a, b) => b.summary.days30 - a.summary.days30);
+
+  const missing = ids.filter((id) => !cards.some((card) => card.id === id));
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-7xl px-6 py-12">
-        <div className="flex items-center justify-between mb-8">
-          <h1 className="text-3xl font-semibold tracking-tight">Compare Candidates</h1>
-          <Link
-            href="/dashboard/recruiter"
-            className="text-sm text-muted-foreground hover:text-foreground"
-          >
-            ← Back to Dashboard
+    <div className="min-h-screen">
+      <main className="mx-auto w-full max-w-5xl px-6 py-12">
+        <div className="flex items-baseline justify-between gap-4">
+          <div>
+            <p className={eyebrowStyles}>Compare</p>
+            <h1 className="mt-2 text-[30px] font-semibold leading-tight tracking-tight text-foreground">
+              Side by side, on the record.
+            </h1>
+          </div>
+          <Link href="/dashboard/recruiter" className={buttonStyles("secondary", "sm")}>
+            Back to search
           </Link>
         </div>
 
-        <div className="border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg p-6 mb-6">
-          <h2 className="text-lg font-medium mb-4">Select Candidates to Compare</h2>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium">Candidate {i}</span>
-                  <input
-                    type="checkbox"
-                    className="rounded border-gray-300"
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setCandidateIds([...candidateIds, `candidate-${i}`]);
-                      } else {
-                        setCandidateIds(candidateIds.filter((id) => id !== `candidate-${i}`));
-                      }
-                    }}
-                  />
-                </div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Streak:</span>
-                    <span className="font-medium">{5 + i * 3}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Avg Score:</span>
-                    <span className="font-medium">{75 + i * 2}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Attempts:</span>
-                    <span className="font-medium">{10 + i * 5}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          Every number below comes from logged attempts. Nothing is inferred, scored for &ldquo;fit&rdquo;,
+          or weighted into a single ranking.
+        </p>
+
+        {missing.length > 0 ? (
+          <p className="mt-6 rounded border border-card-border bg-card px-4 py-3 text-sm text-muted-foreground">
+            {missing.length === 1 ? "One record is" : `${missing.length} records are`} no longer
+            discoverable — that practitioner may have changed their visibility.
+          </p>
+        ) : null}
+
+        <div className="mt-8 overflow-x-auto rounded border border-card-border bg-card">
+          <table className="w-full min-w-[640px] text-sm">
+            <caption className="sr-only">Candidate practice records compared</caption>
+            <thead>
+              <tr className="border-b border-card-border">
+                <th scope="col" className="px-5 py-3 text-left font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                  Candidate
+                </th>
+                <th scope="col" className="px-5 py-3 text-left font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                  Strongest skill
+                </th>
+                <th scope="col" className="px-5 py-3 text-right font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                  90-day avg
+                </th>
+                <th scope="col" className="px-5 py-3 text-right font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                  Active days (30)
+                </th>
+                <th scope="col" className="px-5 py-3 text-right font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                  Strong days (90)
+                </th>
+                <th scope="col" className="px-5 py-3 text-right font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                  Streak
+                </th>
+                <th scope="col" className="px-5 py-3 text-left font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                  Last practice
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {candidates.map((candidate) => {
+                const strongDays = candidate.signals.reduce(
+                  (total, signal) => total + Number(signal.strong_days_90d ?? 0),
+                  0
+                );
+
+                return (
+                  <tr key={candidate.id} className="border-b border-card-border last:border-b-0">
+                    <td className="px-5 py-4">
+                      <Link
+                        href={`/p/${candidate.id}`}
+                        className="text-foreground hover:text-primary"
+                      >
+                        {candidate.summary.name}
+                      </Link>
+                      {candidate.headline ? (
+                        <p className="mt-0.5 max-w-xs truncate text-xs text-muted">{candidate.headline}</p>
+                      ) : null}
+                    </td>
+                    <td className="px-5 py-4 text-muted-foreground">
+                      {candidate.summary.strongestCategory
+                        ? skillLabel(candidate.summary.strongestCategory)
+                        : "—"}
+                    </td>
+                    <td className="px-5 py-4 text-right tabular-nums text-foreground">
+                      {candidate.summary.strongestScore ?? "—"}
+                    </td>
+                    <td className="px-5 py-4 text-right tabular-nums text-foreground">
+                      {candidate.summary.days30}
+                    </td>
+                    <td className="px-5 py-4 text-right tabular-nums text-foreground">{strongDays}</td>
+                    <td className="px-5 py-4 text-right tabular-nums text-foreground">
+                      {candidate.current_streak}
+                    </td>
+                    <td className="px-5 py-4 text-muted-foreground">{candidate.summary.activity}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
 
-        {candidateIds.length >= 2 && (
-          <div className="border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg p-6">
-            <h2 className="text-lg font-medium mb-6">Comparison Results</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-3 px-4">Metric</th>
-                    {candidateIds.map((id) => (
-                      <th key={id} className="text-left py-3 px-4">
-                        {id.replace("candidate-", "Candidate ")}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <td className="py-3 px-4">Current Streak</td>
-                    {candidateIds.map((id, i) => (
-                      <td key={id} className="py-3 px-4 font-medium">
-                        {5 + i * 3} days
-                      </td>
-                    ))}
-                  </tr>
-                  <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <td className="py-3 px-4">Longest Streak</td>
-                    {candidateIds.map((id, i) => (
-                      <td key={id} className="py-3 px-4 font-medium">
-                        {10 + i * 5} days
-                      </td>
-                    ))}
-                  </tr>
-                  <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <td className="py-3 px-4">Average Score</td>
-                    {candidateIds.map((id, i) => (
-                      <td key={id} className="py-3 px-4 font-medium">
-                        {75 + i * 2}%
-                      </td>
-                    ))}
-                  </tr>
-                  <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <td className="py-3 px-4">Total Attempts</td>
-                    {candidateIds.map((id, i) => (
-                      <td key={id} className="py-3 px-4 font-medium">
-                        {10 + i * 5}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td className="py-3 px-4">Last Practice</td>
-                    {candidateIds.map((id, i) => (
-                      <td key={id} className="py-3 px-4 font-medium">
-                        {i === 0 ? "Today" : i === 1 ? "Yesterday" : `${i} days ago`}
-                      </td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
+        <p className="mt-6 text-xs leading-relaxed text-muted">
+          Scores come from each challenge&apos;s rubric (structure, coverage, specificity). No record here
+          has been human-reviewed, so nothing is marked verified.
+        </p>
+      </main>
     </div>
   );
 }
