@@ -9,33 +9,48 @@ interface LogEntry {
   requestId?: string;
 }
 
+/**
+ * Structured, PII-free logging.
+ *
+ * Rules: log identifiers (user id, request id) and codes, never emails, tokens,
+ * passwords, IP addresses or free-text answers. `userId` is a UUID, not a
+ * person's identity, and it is what makes an incident traceable.
+ */
 class Logger {
   private isDevelopment = process.env.NODE_ENV === "development";
 
   private formatLog(entry: LogEntry): string {
-    const contextStr = entry.context ? ` ${JSON.stringify(entry.context)}` : "";
-    const userIdStr = entry.userId ? ` [User: ${entry.userId}]` : "";
-    const requestIdStr = entry.requestId ? ` [Request: ${entry.requestId}]` : "";
-    return `[${entry.timestamp}] ${entry.level.toUpperCase()}${userIdStr}${requestIdStr}: ${entry.message}${contextStr}`;
+    if (!this.isDevelopment) {
+      return JSON.stringify(entry);
+    }
+    const context = entry.context ? ` ${JSON.stringify(entry.context)}` : "";
+    const user = entry.userId ? ` [user:${entry.userId}]` : "";
+    const request = entry.requestId ? ` [req:${entry.requestId}]` : "";
+    return `${entry.timestamp} ${entry.level.toUpperCase()}${user}${request} ${entry.message}${context}`;
   }
 
-  private log(level: LogLevel, message: string, context?: Record<string, unknown>, userId?: string, requestId?: string) {
+  private log(
+    level: LogLevel,
+    message: string,
+    context?: Record<string, unknown>,
+    userId?: string,
+    requestId?: string
+  ) {
+    if (level === "debug" && !this.isDevelopment) return;
+
     const entry: LogEntry = {
       level,
       message,
       timestamp: new Date().toISOString(),
-      context,
-      userId,
-      requestId,
+      ...(context ? { context } : {}),
+      ...(userId ? { userId } : {}),
+      ...(requestId ? { requestId } : {}),
     };
 
-    if (this.isDevelopment) {
-      console.log(this.formatLog(entry));
-    } else {
-      // In production, send to logging service (e.g., Sentry, Datadog, CloudWatch)
-      // For now, we'll still log to console but could replace with external service
-      console.log(this.formatLog(entry));
-    }
+    const line = this.formatLog(entry);
+    if (level === "error") console.error(line);
+    else if (level === "warn") console.warn(line);
+    else console.log(line);
   }
 
   info(message: string, context?: Record<string, unknown>, userId?: string, requestId?: string) {
@@ -51,9 +66,7 @@ class Logger {
   }
 
   debug(message: string, context?: Record<string, unknown>, userId?: string, requestId?: string) {
-    if (this.isDevelopment) {
-      this.log("debug", message, context, userId, requestId);
-    }
+    this.log("debug", message, context, userId, requestId);
   }
 }
 
