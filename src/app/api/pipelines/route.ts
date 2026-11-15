@@ -1,114 +1,82 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/client";
+import { apiRoute, created, fail, ok, readJson } from "@/lib/api";
 import { createPipelineSchema } from "@/lib/validations";
-import { requireRole } from "@/lib/auth-helpers";
 import { logAuditEvent } from "@/lib/audit-logger";
-import { logger } from "@/lib/logger";
+import { hashIp, requestIp } from "@/lib/request-meta";
 
-export async function GET(request: NextRequest) {
-  const requestId = crypto.randomUUID();
-
-  try {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      return NextResponse.json({ error: "Database service not configured" }, { status: 503 });
-    }
-
-    const currentUser = await requireRole(["recruiter", "admin"]);
-
-    const supabase = createClient();
-
+/** The signed-in recruiter's own pipelines. RLS enforces ownership as well. */
+export const GET = apiRoute(
+  async ({ supabase, user }) => {
     const { data: pipelines, error } = await supabase
       .from("recruiter_pipelines")
-      .select(`
-        *,
-        pipeline_candidates (
-          id,
-          candidate_id,
-          stage,
-          added_at,
-          profiles (
-            id,
-            display_name,
-            email,
-            skills
-          )
-        )
-      `)
-      .eq("recruiter_id", currentUser.user.id)
+      .select("id, name, description, created_at")
+      .eq("recruiter_id", user.id)
       .order("created_at", { ascending: false });
 
     if (error) {
-      logger.error("Failed to fetch pipelines", { error: error.message }, currentUser.user.id, requestId);
-      return NextResponse.json({ error: "Failed to fetch pipelines" }, { status: 500 });
+      return fail(500, "pipelines_unavailable", "We could not load your pipelines.");
     }
 
-    return NextResponse.json({ pipelines }, { status: 200 });
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    if (error instanceof Error && error.message === "Forbidden") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    logger.error("Unexpected error in pipelines GET", { error: error instanceof Error ? error.message : String(error) }, undefined, requestId);
-    return NextResponse.json({ error: "An unexpected error occurred" }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  const requestId = crypto.randomUUID();
-  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
-
-  try {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      return NextResponse.json({ error: "Database service not configured" }, { status: 503 });
+    const pipelineIds = (pipelines ?? []).map((pipeline) => pipeline.id);
+    if (pipelineIds.length === 0) {
+      return ok({ pipelines: [] });
     }
 
-    const currentUser = await requireRole(["recruiter", "admin"]);
+    const { data: members } = await supabase
+      .from("pipeline_candidates")
+      .select("id, pipeline_id, candidate_id, stage, notes, tags, added_at")
+      .in("pipeline_id", pipelineIds);
 
-    const body = await request.json();
-    const validationResult = createPipelineSchema.safeParse(body);
+    const candidateIds = Array.from(new Set((members ?? []).map((member) => member.candidate_id)));
 
-    if (!validationResult.success) {
-      return NextResponse.json({ error: "Invalid input", details: validationResult.error.issues }, { status: 400 });
-    }
+    const { data: cards } = candidateIds.length
+      ? await supabase
+          .from("profile_cards")
+          .select("id, display_name, headline, skills, current_streak, longest_streak")
+          .in("id", candidateIds)
+      : { data: [] as Array<Record<string, unknown>> };
 
-    const supabase = createClient();
+    const cardById = new Map((cards ?? []).map((card) => [card.id, card]));
+
+    return ok({
+      pipelines: (pipelines ?? []).map((pipeline) => ({
+        ...pipeline,
+        candidates: (members ?? [])
+          .filter((member) => member.pipeline_id === pipeline.id)
+          .map((member) => ({ ...member, candidate: cardById.get(member.candidate_id) ?? null })),
+      })),
+    });
+  },
+  { roles: ["recruiter", "admin"] }
+);
+
+export const POST = apiRoute(
+  async ({ request, supabase, user, requestId, profile }) => {
+    const input = await readJson(request, createPipelineSchema);
 
     const { data: pipeline, error } = await supabase
       .from("recruiter_pipelines")
       .insert({
-        recruiter_id: currentUser.user.id,
-        ...validationResult.data,
+        recruiter_id: user.id,
+        name: input.name,
+        description: input.description ?? null,
       })
-      .select()
+      .select("id, name, description, created_at")
       .single();
 
     if (error) {
-      logger.error("Failed to create pipeline", { error: error.message }, currentUser.user.id, requestId);
-      return NextResponse.json({ error: "Failed to create pipeline" }, { status: 500 });
+      return fail(500, "pipeline_create_failed", "We could not create that pipeline.", { requestId });
     }
 
-    await logAuditEvent(
-      currentUser.user.id,
-      "create_pipeline",
-      "recruiter_pipelines",
-      pipeline.id,
-      { name: pipeline.name },
-      ip
-    );
+    await logAuditEvent(supabase, user.id, {
+      action: "pipeline_created",
+      resourceType: "recruiter_pipelines",
+      resourceId: pipeline.id,
+      details: { name: input.name },
+      ipHash: hashIp(requestIp(request.headers)),
+      actorRole: profile.role,
+    });
 
-    logger.info("Pipeline created successfully", { pipelineId: pipeline.id }, currentUser.user.id, requestId);
-
-    return NextResponse.json({ pipeline }, { status: 201 });
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    if (error instanceof Error && error.message === "Forbidden") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    logger.error("Unexpected error in pipelines POST", { error: error instanceof Error ? error.message : String(error) }, undefined, requestId);
-    return NextResponse.json({ error: "An unexpected error occurred" }, { status: 500 });
-  }
-}
+    return created({ pipeline });
+  },
+  { roles: ["recruiter", "admin"], mutation: true }
+);

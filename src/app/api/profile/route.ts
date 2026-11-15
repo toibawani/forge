@@ -1,110 +1,66 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/client";
+import { apiRoute, fail, ok, readJson } from "@/lib/api";
 import { updateProfileSchema } from "@/lib/validations";
-import { logger } from "@/lib/logger";
 import { logAuditEvent } from "@/lib/audit-logger";
+import { hashIp, requestIp } from "@/lib/request-meta";
+import { purgeUserCaches } from "@/lib/dpdp";
 
-export async function GET(request: NextRequest) {
-  const requestId = crypto.randomUUID();
+/** The signed-in user's own profile. Always private, always uncached. */
+export const GET = apiRoute(async ({ supabase, user }) => {
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select(
+      "id, display_name, headline, bio, avatar_url, skills, role, company_name, visibility, allow_recruiter_contact, profile_views_count, consent_at, consent_policy_version, created_at, updated_at"
+    )
+    .eq("id", user.id)
+    .single();
 
-  try {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      return NextResponse.json({ error: "Authentication service not configured" }, { status: 503 });
-    }
-
-    const supabase = createClient();
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: profile, error } = await supabase
-      .from("profiles")
-      .select(`
-        *,
-        streaks (
-          current_streak,
-          longest_streak,
-          total_practice_days,
-          last_practice_date
-        )
-      `)
-      .eq("id", user.id)
-      .single();
-
-    if (error) {
-      logger.error("Failed to fetch profile", { error: error.message }, user.id, requestId);
-      return NextResponse.json({ error: "Failed to fetch profile" }, { status: 500 });
-    }
-
-    logger.info("Profile fetched successfully", undefined, user.id, requestId);
-
-    return NextResponse.json({ profile }, { status: 200 });
-  } catch (error) {
-    logger.error("Unexpected error in profile GET", { error: error instanceof Error ? error.message : String(error) }, undefined, requestId);
-    return NextResponse.json({ error: "An unexpected error occurred" }, { status: 500 });
+  if (error) {
+    return fail(500, "profile_unavailable", "We could not load your profile.");
   }
-}
 
-export async function PATCH(request: NextRequest) {
-  const requestId = crypto.randomUUID();
-  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
+  return ok({ profile });
+});
 
-  try {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      return NextResponse.json({ error: "Authentication service not configured" }, { status: 503 });
-    }
+export const PATCH = apiRoute(async ({ request, supabase, user, requestId, profile }) => {
+  const input = await readJson(request, updateProfileSchema);
 
-    const supabase = createClient();
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const body = await request.json();
-
-    const validationResult = updateProfileSchema.safeParse(body);
-    if (!validationResult.success) {
-      logger.warn("Invalid profile update input", { errors: validationResult.error.issues }, user.id, requestId);
-      return NextResponse.json({ error: "Invalid input", details: validationResult.error.issues }, { status: 400 });
-    }
-
-    const { data: profile, error } = await supabase
-      .from("profiles")
-      .update(validationResult.data)
-      .eq("id", user.id)
-      .select()
-      .single();
-
-    if (error) {
-      logger.error("Failed to update profile", { error: error.message }, user.id, requestId);
-      return NextResponse.json({ error: "Failed to update profile" }, { status: 500 });
-    }
-
-    await logAuditEvent(
-      user.id,
-      "update_profile",
-      "profiles",
-      user.id,
-      { updates: validationResult.data },
-      ip
-    );
-
-    logger.info("Profile updated successfully", undefined, user.id, requestId);
-
-    return NextResponse.json({ profile }, { status: 200 });
-  } catch (error) {
-    logger.error("Unexpected error in profile PATCH", { error: error instanceof Error ? error.message : String(error) }, undefined, requestId);
-    return NextResponse.json({ error: "An unexpected error occurred" }, { status: 500 });
+  // camelCase -> snake_case, explicit allow-list. Role, counters and erasure
+  // state are not writable here, and the database rejects them anyway.
+  const patch: Record<string, unknown> = {};
+  if (input.displayName !== undefined) patch.display_name = input.displayName;
+  if (input.headline !== undefined) patch.headline = input.headline;
+  if (input.bio !== undefined) patch.bio = input.bio;
+  if (input.skills !== undefined) patch.skills = input.skills;
+  if (input.visibility !== undefined) patch.visibility = input.visibility;
+  if (input.allowRecruiterContact !== undefined) {
+    patch.allow_recruiter_contact = input.allowRecruiterContact;
   }
-}
+  if (input.companyName !== undefined) patch.company_name = input.companyName;
+
+  const { data: updated, error } = await supabase
+    .from("profiles")
+    .update(patch)
+    .eq("id", user.id)
+    .select(
+      "id, display_name, headline, bio, skills, visibility, allow_recruiter_contact, company_name, updated_at"
+    )
+    .single();
+
+  if (error) {
+    return fail(500, "profile_update_failed", "We could not save those changes.", { requestId });
+  }
+
+  await logAuditEvent(supabase, user.id, {
+    action: "profile_updated",
+    resourceType: "profiles",
+    resourceId: user.id,
+    details: { fields: Object.keys(patch) },
+    ipHash: hashIp(requestIp(request.headers)),
+    actorRole: profile.role,
+  });
+
+  // Personal data changed: drop any rendered/cached copy of it.
+  await purgeUserCaches(user.id);
+
+  return ok({ profile: updated });
+});

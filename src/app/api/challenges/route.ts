@@ -1,158 +1,117 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/client";
+import { apiRoute, created, fail, ok, readJson } from "@/lib/api";
 import { challengeAttemptSchema } from "@/lib/validations";
+import { scoreSubmission, type Rubric } from "@/lib/scoring";
+import { hashIp, requestIp } from "@/lib/request-meta";
+import { rateLimit } from "@/lib/rate-limit";
+import { logAuditEvent } from "@/lib/audit-logger";
 import { logger } from "@/lib/logger";
 
-export async function GET(request: NextRequest) {
-  const requestId = crypto.randomUUID();
-
-  try {
-    // Check if Supabase is configured
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      logger.warn("Supabase not configured for challenges GET", undefined, undefined, requestId);
-      return NextResponse.json(
-        { error: "Database service not configured" },
-        { status: 503 }
-      );
-    }
-
-    const supabase = createClient();
-
+/** Public challenge catalogue. No personal data, so it is safely cacheable. */
+export const GET = apiRoute(
+  async ({ request, supabase }) => {
     const { searchParams } = new URL(request.url);
-    const difficulty = searchParams.get("difficulty");
     const category = searchParams.get("category");
+    const difficulty = searchParams.get("difficulty");
 
     let query = supabase
       .from("challenges")
-      .select("*")
-      .eq("is_active", true);
+      .select("id, slug, title, description, difficulty, category, estimated_minutes, time_limit_seconds")
+      .eq("is_active", true)
+      .order("difficulty");
 
-    if (difficulty) {
-      query = query.eq("difficulty", difficulty);
-    }
+    if (category) query = query.eq("category", category);
+    if (difficulty) query = query.eq("difficulty", difficulty);
 
-    if (category) {
-      query = query.eq("category", category);
-    }
-
-    const { data: challenges, error } = await query;
+    const { data, error } = await query;
 
     if (error) {
-      logger.error("Failed to fetch challenges", { error: error.message }, undefined, requestId);
-      return NextResponse.json(
-        { error: "Failed to fetch challenges" },
-        { status: 500 }
-      );
+      logger.error("Challenge list failed", { code: error.code });
+      return fail(500, "challenge_list_failed", "We could not load challenges.");
     }
 
-    logger.info("Challenges fetched successfully", { count: challenges?.length }, undefined, requestId);
+    return ok({ challenges: data ?? [] });
+  },
+  { auth: "public" }
+);
 
-    return NextResponse.json({ challenges }, { status: 200 });
-  } catch (error) {
-    logger.error("Unexpected error in challenges GET", { error: error instanceof Error ? error.message : String(error) }, undefined, requestId);
-    return NextResponse.json(
-      { error: "An unexpected error occurred" },
-      { status: 500 }
-    );
+/**
+ * Records a practice attempt.
+ *
+ * The score is computed server-side from the challenge rubric — the client
+ * cannot submit its own score — and the attempt is immutable once written.
+ * Idempotency keys make retries safe on flaky networks.
+ */
+export const POST = apiRoute(async ({ request, supabase, user, requestId, profile }) => {
+  const ipHash = hashIp(requestIp(request.headers));
+  const rate = rateLimit(`attempt:${user.id}`, 30, 60 * 60 * 1000);
+  if (!rate.success) {
+    return fail(429, "rate_limited", "You have logged a lot of practice today. Come back later.");
   }
-}
 
-export async function POST(request: NextRequest) {
-  const requestId = crypto.randomUUID();
+  const input = await readJson(request, challengeAttemptSchema);
 
-  try {
-    // Check if Supabase is configured
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      logger.warn("Supabase not configured for challenges POST", undefined, undefined, requestId);
-      return NextResponse.json(
-        { error: "Database service not configured" },
-        { status: 503 }
-      );
-    }
+  const { data: challenge, error: challengeError } = await supabase
+    .from("challenges")
+    .select("id, category, rubric, title, is_active")
+    .eq("id", input.challengeId)
+    .eq("is_active", true)
+    .maybeSingle();
 
-    const supabase = createClient();
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      logger.warn("Unauthorized challenge attempt", undefined, undefined, requestId);
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const body = await request.json();
-
-    // Validate input
-    const validationResult = challengeAttemptSchema.safeParse(body);
-    if (!validationResult.success) {
-      logger.warn("Invalid challenge attempt input", { errors: validationResult.error.issues }, user.id, requestId);
-      return NextResponse.json(
-        { error: "Invalid input", details: validationResult.error.issues },
-        { status: 400 }
-      );
-    }
-
-    const { challengeId, answer, timeSpent, idempotencyKey } = validationResult.data;
-
-    // Verify challenge exists
-    const { data: challenge, error: challengeError } = await supabase
-      .from("challenges")
-      .select("*")
-      .eq("id", challengeId)
-      .single();
-
-    if (challengeError || !challenge) {
-      logger.warn("Challenge not found", { challengeId }, user.id, requestId);
-      return NextResponse.json(
-        { error: "Challenge not found" },
-        { status: 404 }
-      );
-    }
-
-    // Calculate score (simplified - in production, use actual grading logic)
-    const score = Math.floor(Math.random() * 40) + 60; // 60-100 range for demo
-
-    // Record attempt with idempotency
-    const { data: attempt, error: attemptError } = await supabase
-      .from("challenge_attempts")
-      .insert({
-        user_id: user.id,
-        challenge_id: challengeId,
-        submission: { answer },
-        score,
-        time_spent_seconds: timeSpent,
-        status: "completed",
-        idempotency_key: idempotencyKey,
-        ip_address: request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown",
-        user_agent: request.headers.get("user-agent") || "unknown",
-      })
-      .select()
-      .single();
-
-    if (attemptError) {
-      logger.error("Failed to record challenge attempt", { error: attemptError.message }, user.id, requestId);
-      return NextResponse.json(
-        { error: "Failed to record attempt" },
-        { status: 500 }
-      );
-    }
-
-    logger.info("Challenge attempt recorded successfully", { challengeId, score }, user.id, requestId);
-
-    return NextResponse.json(
-      { attempt, score },
-      { status: 201 }
-    );
-  } catch (error) {
-    logger.error("Unexpected error in challenges POST", { error: error instanceof Error ? error.message : String(error) }, undefined, requestId);
-    return NextResponse.json(
-      { error: "An unexpected error occurred" },
-      { status: 500 }
-    );
+  if (challengeError || !challenge) {
+    return fail(404, "challenge_not_found", "That challenge is not available.");
   }
-}
+
+  const breakdown = scoreSubmission(
+    input.answer,
+    (challenge.rubric as Rubric | null) ?? null,
+    challenge.category
+  );
+
+  const { data: attempt, error: insertError } = await supabase
+    .from("challenge_attempts")
+    .insert({
+      user_id: user.id,
+      challenge_id: challenge.id,
+      submission: {
+        answer: input.answer,
+        scoring: breakdown,
+      },
+      score: breakdown.score,
+      time_spent_seconds: input.timeSpent,
+      status: "completed",
+      idempotency_key: input.idempotencyKey ?? null,
+      ip_hash: ipHash,
+    })
+    .select("id, score, practice_date, created_at")
+    .single();
+
+  if (insertError) {
+    // Unique idempotency key: return the existing attempt instead of failing.
+    if (insertError.code === "23505" && input.idempotencyKey) {
+      const { data: existing } = await supabase
+        .from("challenge_attempts")
+        .select("id, score, practice_date, created_at")
+        .eq("idempotency_key", input.idempotencyKey)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (existing) {
+        return ok({ attempt: existing, scoring: breakdown, idempotent: true });
+      }
+    }
+
+    logger.error("Attempt insert failed", { code: insertError.code }, user.id, requestId);
+    return fail(500, "attempt_failed", "We could not save that attempt. Try again.");
+  }
+
+  await logAuditEvent(supabase, user.id, {
+    action: "practice_recorded",
+    resourceType: "challenge_attempts",
+    resourceId: attempt.id,
+    details: { challengeId: challenge.id, score: breakdown.score },
+    ipHash,
+    actorRole: profile.role,
+  });
+
+  return created({ attempt, scoring: breakdown });
+});

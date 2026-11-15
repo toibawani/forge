@@ -1,110 +1,107 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/client";
+import { apiRoute, fail, ok } from "@/lib/api";
 import { recruiterSearchSchema } from "@/lib/validations";
-import { requireRole } from "@/lib/auth-helpers";
 import { logAuditEvent } from "@/lib/audit-logger";
-import { logger } from "@/lib/logger";
+import { hashIp, requestIp } from "@/lib/request-meta";
 import { rateLimit } from "@/lib/rate-limit";
 
-export async function GET(request: NextRequest) {
-  const requestId = crypto.randomUUID();
-  const ip = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown";
-
-  try {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      return NextResponse.json({ error: "Database service not configured" }, { status: 503 });
-    }
-
-    const currentUser = await requireRole(["recruiter", "admin"]);
-
-    const rateLimitResult = rateLimit(ip, 30, 60000);
-    if (!rateLimitResult.success) {
-      logger.warn("Rate limit exceeded for recruiter search", { ip }, currentUser.user.id, requestId);
-      return NextResponse.json({ error: "Too many search requests" }, { status: 429 });
+/**
+ * Recruiter discovery, served from the `profile_cards` view.
+ *
+ * The view only exposes opted-in practitioners and never includes email or any
+ * other contact detail. Raw `profiles` rows stay behind RLS, so search cannot
+ * become a data-dump endpoint. Every search is audited.
+ */
+export const GET = apiRoute(
+  async ({ request, supabase, user, requestId, profile }) => {
+    const ipHash = hashIp(requestIp(request.headers));
+    const rate = rateLimit(`recruiter-search:${user.id}`, 30, 60 * 1000);
+    if (!rate.success) {
+      return fail(429, "rate_limited", "Too many searches. Wait a minute.");
     }
 
     const { searchParams } = new URL(request.url);
-    const query = {
-      skills: searchParams.get("skills")?.split(","),
-      difficulty: searchParams.get("difficulty"),
-      category: searchParams.get("category"),
-      minStreak: searchParams.get("minStreak") ? parseInt(searchParams.get("minStreak")!) : undefined,
-      minScore: searchParams.get("minScore") ? parseInt(searchParams.get("minScore")!) : undefined,
-      timeFrame: searchParams.get("timeFrame"),
-      visibility: searchParams.get("visibility") || "public",
-      limit: parseInt(searchParams.get("limit") || "20"),
-      offset: parseInt(searchParams.get("offset") || "0"),
-    };
+    const parseList = (value: string | null) =>
+      value
+        ? value
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : undefined;
 
-    const validationResult = recruiterSearchSchema.safeParse(query);
-    if (!validationResult.success) {
-      return NextResponse.json({ error: "Invalid search parameters", details: validationResult.error.issues }, { status: 400 });
+    const candidate = recruiterSearchSchema.safeParse({
+      skills: parseList(searchParams.get("skills")),
+      minStreak: searchParams.get("minStreak") ? Number(searchParams.get("minStreak")) : undefined,
+      minAvgScore: searchParams.get("minAvgScore") ? Number(searchParams.get("minAvgScore")) : undefined,
+      category: searchParams.get("category") ?? undefined,
+      limit: searchParams.get("limit") ? Number(searchParams.get("limit")) : undefined,
+      offset: searchParams.get("offset") ? Number(searchParams.get("offset")) : undefined,
+    });
+
+    if (!candidate.success) {
+      return fail(400, "invalid_search", "Some filters are not valid.", candidate.error.issues);
     }
 
-    const supabase = createClient();
+    const { skills, minStreak, minAvgScore, limit, offset } = candidate.data;
 
-    let profilesQuery = supabase
-      .from("profiles")
-      .select(`
-        id,
-        email,
-        display_name,
-        bio,
-        skills,
-        visibility,
-        profile_views_count,
-        created_at,
-        streaks (
-          current_streak,
-          longest_streak,
-          total_practice_days
-        ),
-        challenge_attempts (
-          score,
-          created_at
-        )
-      `, { count: "exact" })
-      .in("visibility", ["public", "recruiters_only"])
-      .order("created_at", { ascending: false });
+    let query = supabase
+      .from("profile_cards")
+      .select(
+        "id, display_name, headline, bio, skills, visibility, current_streak, longest_streak, total_practice_days, last_practice_date",
+        { count: "exact" }
+      )
+      .order("current_streak", { ascending: false })
+      .order("total_practice_days", { ascending: false });
 
-    if (validationResult.data.skills && validationResult.data.skills.length > 0) {
-      profilesQuery = profilesQuery.contains("skills", validationResult.data.skills);
-    }
+    if (skills && skills.length > 0) query = query.contains("skills", skills);
+    if (minStreak !== undefined) query = query.gte("current_streak", minStreak);
 
-    if (validationResult.data.minStreak) {
-      profilesQuery = profilesQuery.gte("streaks.current_streak", validationResult.data.minStreak);
-    }
-
-    const { data: profiles, error, count } = await profilesQuery.range(
-      validationResult.data.offset,
-      validationResult.data.offset + validationResult.data.limit - 1
-    );
+    const { data: cards, error, count } = await query.range(offset, offset + limit - 1);
 
     if (error) {
-      logger.error("Recruiter search failed", { error: error.message }, currentUser.user.id, requestId);
-      return NextResponse.json({ error: "Search failed" }, { status: 500 });
+      return fail(500, "search_failed", "Search is unavailable right now.", { requestId });
     }
 
-    await logAuditEvent(
-      currentUser.user.id,
-      "search_candidates",
-      "profiles",
-      undefined,
-      { query: validationResult.data, resultsCount: count },
-      ip
-    );
+    const ids = (cards ?? []).map((card) => card.id);
+    let signals: Array<Record<string, unknown>> = [];
 
-    logger.info("Recruiter search completed", { resultsCount: count }, currentUser.user.id, requestId);
+    if (ids.length > 0) {
+      const { data: signalRows } = await supabase
+        .from("skill_signals")
+        .select("user_id, category, attempts_30d, avg_score_30d, best_score, active_days, last_attempt_at")
+        .in("user_id", ids);
+      signals = signalRows ?? [];
+    }
 
-    return NextResponse.json({ profiles, count, limit: validationResult.data.limit, offset: validationResult.data.offset }, { status: 200 });
-  } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const byUser = new Map<string, Array<Record<string, unknown>>>();
+    for (const signal of signals) {
+      const key = String(signal.user_id);
+      byUser.set(key, [...(byUser.get(key) ?? []), signal]);
     }
-    if (error instanceof Error && error.message === "Forbidden") {
-      return NextResponse.json({ error: "Forbidden - recruiter access required" }, { status: 403 });
+
+    let results = (cards ?? []).map((card) => ({
+      ...card,
+      signals: byUser.get(card.id) ?? [],
+    }));
+
+    if (minAvgScore !== undefined) {
+      results = results.filter((candidateRow) => {
+        const scores = candidateRow.signals
+          .map((signal) => Number(signal.avg_score_30d ?? 0))
+          .filter((score) => Number.isFinite(score));
+        if (scores.length === 0) return false;
+        return Math.max(...scores) >= minAvgScore;
+      });
     }
-    logger.error("Unexpected error in recruiter search", { error: error instanceof Error ? error.message : String(error) }, undefined, requestId);
-    return NextResponse.json({ error: "An unexpected error occurred" }, { status: 500 });
-  }
-}
+
+    await logAuditEvent(supabase, user.id, {
+      action: "recruiter_search",
+      resourceType: "profile_cards",
+      details: { filters: { skills, minStreak, minAvgScore }, results: results.length },
+      ipHash,
+      actorRole: profile.role,
+    });
+
+    return ok({ results, count: count ?? results.length, limit, offset });
+  },
+  { roles: ["recruiter", "admin"] }
+);
