@@ -51,7 +51,7 @@ export type AttemptFeedback = {
 };
 
 const HEDGES = /\b(maybe|perhaps|i think|i guess|probably|possibly|kind of|sort of|somewhat|hopefully|i believe|it seems)\b/gi;
-const VAGUE = /\b(some|many|a lot|a few|several|stuff|things|various|etc\.?|and so on|stuff like that)\b/gi;
+const VAGUE = /\b(some|many|a lot|a few|several|stuff|things|something|various|etc\.?|and so on|stuff like that)\b/gi;
 
 export function measureAnswer(answer: string): FeedbackMetrics {
   const text = answer.trim();

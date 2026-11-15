@@ -349,7 +349,15 @@ function weakestCategory(
   return weakest.category;
 }
 
-function levelIndexFor(attempts: SelectionAttempt[]): number {
+/**
+ * Level index used to choose difficulty.
+ *
+ * Exported so tests can prove it agrees with `progressFor` in progression.ts.
+ * Selection and progression keep separate implementations because this module
+ * must stay dependency-free (it renders on the client), but two answers to
+ * "what level is this person" would be a product bug, not a style choice.
+ */
+export function levelIndexFor(attempts: SelectionAttempt[]): number {
   const days = new Set(attempts.map((attempt) => attempt.practice_date)).size;
   const recent = attempts
     .filter((attempt) => typeof attempt.score === "number")

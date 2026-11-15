@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --experimental-strip-types --test src/lib/scoring.test.ts src/lib/feedback.test.ts src/lib/progression.test.ts src/lib/challenges.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -28,6 +29,9 @@
     "typescript": "^5"
   },
   "description": "Daily skill proof for people who want to be hired for what they can do.",
+  "engines": {
+    "node": ">=22.6"
+  },
   "keywords": [
     "skill verification",
     "daily practice",

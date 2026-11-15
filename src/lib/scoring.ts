@@ -32,9 +32,22 @@ export function scoreSubmission(
   category: string
 ): ScoreBreakdown {
   const text = answer.trim();
+
+  // An empty submission is worth zero. Without this guard the structural
+  // floors below would hand out a passable score for writing nothing, which
+  // would make every number on the record suspect.
+  if (text.length === 0) {
+    return {
+      version: "rubric-v1",
+      score: 0,
+      signals: { completeness: 0, structure: 0, specificity: 0 },
+      notes: ["Nothing was submitted."],
+    };
+  }
+
   const words = text.split(/\s+/).filter(Boolean);
   const wordCount = words.length;
-  const minWords = rubric?.min_words ?? 25;
+  const minWords = Math.max(1, rubric?.min_words ?? 25);
   const notes: string[] = [];
 
   // Completeness: does the answer actually engage with the task?
