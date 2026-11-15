@@ -95,6 +95,8 @@ rolls back everything and prints `rls tests passed` only if every assertion held
 | Input validation | Zod schema on every request body; explicit field allow-lists in updates |
 | No PII in caches | `Cache-Control: no-store` on all account routes, middleware-level `no-store` for `/api/*` |
 | No PII in logs | Structured logs carry user **id** and request **id**, never email, tokens or IPs |
+| Duration cannot be faked | `practice_sessions.started_at` is written by the server before the prompt is shown; the attempt route derives `time_spent_seconds` from it |
+| Sessions are private and sealed | RLS on `practice_sessions`, `update`/`delete` revoked, closed by a `security definer` trigger on attempt insert |
 | Secrets | `SUPABASE_SERVICE_ROLE_KEY` is imported only by `src/lib/supabase/admin.ts` (`server-only`) |
 
 ## DPDP Act 2023 compliance
@@ -148,6 +150,9 @@ It processes due deletions, records accountability rows, runs retention cleanup,
 /login, /signup          auth + itemised consent
 /auth/callback           email confirmation / recovery exchange
 /dashboard               streak, consistency, 14-day activity, recent sessions
+/practice                skill picker, recommendation, catalogue
+/practice/[slug]         focused runner: brief, timer, answer, submit
+/practice/[slug]/result/[attemptId]   score, rubric signals, streak, delta
 /profile                 full skill record timeline
 /settings                profile, consent register, export, data requests, delete account
 /privacy, /privacy/hindi policy in English and Hindi
@@ -156,7 +161,8 @@ It processes due deletions, records accountability rows, runs retention cleanup,
 POST   /api/auth/signup | login | logout
 GET    /api/auth/…       (session cookie based, httpOnly)
 GET    /api/challenges   public catalogue
-POST   /api/challenges   record an attempt (rubric v1, server-scored, idempotent)
+POST   /api/challenges   record an attempt (rubric v1, server-scored, server-timed, idempotent)
+POST   /api/practice/sessions   open a timed session before the prompt renders
 GET    /api/profile      own profile
 PATCH  /api/profile      update allowed fields, purges caches
 GET    /api/export       full data export (json | csv)
@@ -214,8 +220,9 @@ docs/incident-runbook.md                DPDP breach response
   running more than one instance; credential stuffing is the realistic attack.
 - **Immediate deletion needs the service role.** Without `SUPABASE_SERVICE_ROLE_KEY` the flow
   returns 503 and offers the 30-day path rather than pretending to delete.
-- **The practice UI is not built yet.** The dashboard shows the record honestly; the runner that
-  submits to `/api/challenges` is the next milestone.
+- **Scoring is rule-based, not semantic.** Rubric v1 measures completeness, structure and
+  specificity. It cannot judge whether an argument is *correct*, so a confident wrong answer can
+  score well. Peer or expert review is the next layer, not a model pretending to grade.
 - **Recruiter dashboard search UI is not wired** to `/api/recruiters/search` (the API is ready).
 - **Backups are only as good as the provider setting.** Supabase's PITR/backup window must be
   configured; erasure from backups follows that rotation.
