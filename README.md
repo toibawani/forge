@@ -152,6 +152,30 @@ It processes due deletions, records accountability rows, runs retention cleanup,
 `{ processed, erased, failed, retention }`. Failures stay in `account_deletions` as `failed` with a
 `failure_code` for retry.
 
+### Product email
+
+Optional, and off unless a provider is configured. With neither key set, the app returns
+`email_not_configured` and sends nothing — it never logs a message as delivered when it was not.
+
+```bash
+# Weekly record, Monday morning
+curl -H "Authorization: Bearer $CRON_SECRET" https://your-app/api/cron/weekly-summary
+
+# Streak warnings, late in the day (POST so a link check cannot fire it)
+curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://your-app/api/cron/weekly-summary
+```
+
+Two transports, chosen by whichever key is present:
+
+| Transport | Env | What it owns |
+|---|---|---|
+| Knock (orchestration) | `KNOCK_API_KEY`, `KNOCK_SIGNING_KEY` | Templates, recipient preferences, unsubscribe — Forge triggers `weekly-summary` / `streak-warning` workflows |
+| Resend (direct) | `RESEND_API_KEY`, `EMAIL_FROM` | Forge renders the HTML itself and posts it |
+
+Consent is the gate: only a person whose latest `product_emails` consent is granted receives mail,
+and every message links to the consent toggles at `/settings#emails`. A week with no attempts
+produces no email rather than a zero.
+
 ## Environment variables
 
 | Name | Scope | Purpose |
@@ -161,7 +185,9 @@ It processes due deletions, records accountability rows, runs retention cleanup,
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only** | Erasure, breach register, cron |
 | `NEXT_PUBLIC_APP_URL` | public | Origin for redirects and same-origin checks |
 | `IP_HASH_PEPPER` | **server only** | Salt for IP and user-reference hashes |
-| `CRON_SECRET` | **server only** | Bearer token for `/api/cron/erasure` |
+| `CRON_SECRET` | **server only** | Bearer token for `/api/cron/*` |
+| `KNOCK_API_KEY` / `KNOCK_SIGNING_KEY` | **server only** | Optional: email via Knock workflows |
+| `RESEND_API_KEY` / `EMAIL_FROM` | **server only** | Optional: direct email send |
 | `NEXT_PUBLIC_GRIEVANCE_EMAIL` | public | Grievance Officer contact |
 | `CACHE_PURGE_URL` / `CACHE_PURGE_TOKEN` | **server only** | Optional CDN purge on update/delete |
 
@@ -214,6 +240,8 @@ GET    /api/admin/breaches         breach register (admin only)
 POST   /api/admin/breaches         log a breach (admin only)
 PATCH  /api/admin/breaches         stamp containment / notifications (admin only)
 GET    /api/cron/erasure           scheduled erasure + retention (bearer token)
+GET    /api/cron/weekly-summary    weekly record email for consenting users (bearer token)
+POST   /api/cron/weekly-summary    streak warnings, still-open streaks only (bearer token)
 ```
 
 ## Project structure

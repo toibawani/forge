@@ -418,6 +418,9 @@ export function SettingsClient({
         </form>
       </Section>
 
+      {/* Anchor target for the unsubscribe link in email: consent lives here. */}
+      <span id="emails" className="block scroll-mt-24" />
+
       <Section title="Consent" caption={`Policy version ${policyVersion}`}>
         <p className="text-sm leading-relaxed text-muted-foreground">
           Consent is recorded per purpose, with the policy version and the time you gave it. Required items
