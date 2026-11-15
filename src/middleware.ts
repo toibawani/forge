@@ -10,7 +10,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * logged out when the access token expires.
  */
 
-const PROTECTED_PREFIXES = ["/dashboard", "/settings", "/profile"];
+const PROTECTED_PREFIXES = ["/dashboard", "/settings", "/profile", "/practice"];
 const AUTH_PAGES = ["/login", "/signup"];
 
 export async function middleware(request: NextRequest) {
