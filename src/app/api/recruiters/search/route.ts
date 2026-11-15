@@ -67,7 +67,9 @@ export const GET = apiRoute(
     if (ids.length > 0) {
       const { data: signalRows } = await supabase
         .from("skill_signals")
-        .select("user_id, category, attempts_30d, avg_score_30d, best_score, active_days, last_attempt_at")
+        .select(
+          "user_id, category, total_attempts, attempts_30d, days_30d, avg_score_30d, avg_score_90d, best_score, strong_days_90d, last_attempt_at"
+        )
         .in("user_id", ids);
       signals = signalRows ?? [];
     }
@@ -78,10 +80,17 @@ export const GET = apiRoute(
       byUser.set(key, [...(byUser.get(key) ?? []), signal]);
     }
 
-    let results = (cards ?? []).map((card) => ({
-      ...card,
-      signals: byUser.get(card.id) ?? [],
-    }));
+    let results = (cards ?? []).map((card) => {
+      const signalsForUser = byUser.get(card.id) ?? [];
+      const days30 = signalsForUser.reduce((total, signal) => total + Number(signal.days_30d ?? 0), 0);
+      return {
+        ...card,
+        signals: signalsForUser,
+        // Recency and consistency carry more weight than a lifetime streak, so
+        // an actively practising person outranks someone coasting on history.
+        recentActivityDays: days30,
+      };
+    });
 
     if (minAvgScore !== undefined) {
       results = results.filter((candidateRow) => {
@@ -92,6 +101,13 @@ export const GET = apiRoute(
         return Math.max(...scores) >= minAvgScore;
       });
     }
+
+    results.sort((a, b) => {
+      if (b.recentActivityDays !== a.recentActivityDays) {
+        return b.recentActivityDays - a.recentActivityDays;
+      }
+      return (b.current_streak ?? 0) - (a.current_streak ?? 0);
+    });
 
     await logAuditEvent(supabase, user.id, {
       action: "recruiter_search",

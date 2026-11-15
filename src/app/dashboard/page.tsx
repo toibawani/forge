@@ -3,7 +3,15 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerUser } from "@/lib/supabase/server";
 import { buttonStyles, eyebrowStyles } from "@/components/ui/styles";
-import { scoreBand } from "@/lib/challenges";
+import { recommendNext, scoreBand, skillLabel, type Challenge } from "@/lib/challenges";
+import {
+  consistencyTrend,
+  levelsByCategory,
+  nextMilestone,
+  progressFor,
+  scoreTrend,
+  type ScoredAttempt,
+} from "@/lib/progression";
 
 export const metadata: Metadata = {
   title: "Dashboard — Forge",
@@ -14,6 +22,7 @@ export const dynamic = "force-dynamic";
 
 type AttemptRow = {
   id: string;
+  challenge_id: string;
   score: number | null;
   created_at: string;
   practice_date: string;
@@ -32,19 +41,8 @@ function isoDay(date: Date): string {
 
 function lastDays(count: number): string[] {
   const today = new Date();
-  return Array.from({ length: count }, (_, index) => {
-    const date = new Date(today.getTime() - (count - 1 - index) * DAY_MS);
-    return isoDay(date);
-  });
-}
-
-/** Distinct practice days inside the trailing window, used for consistency. */
-function recentPracticeDays(attempts: AttemptRow[], days: number): Set<string> {
-  const cutoff = Date.now() - days * DAY_MS;
-  return new Set(
-    attempts
-      .filter((attempt) => new Date(attempt.created_at).getTime() >= cutoff)
-      .map((attempt) => attempt.practice_date)
+  return Array.from({ length: count }, (_, index) =>
+    isoDay(new Date(today.getTime() - (count - 1 - index) * DAY_MS))
   );
 }
 
@@ -64,13 +62,19 @@ function formatDay(value: string): string {
   });
 }
 
+function deltaLabel(delta: number | null, unit = ""): string {
+  if (delta === null) return "no earlier window";
+  if (delta === 0) return `flat${unit ? ` ${unit}` : ""}`;
+  return `${delta > 0 ? "+" : ""}${delta}${unit}`;
+}
+
 export default async function DashboardPage() {
   const session = await getServerUser();
   if (!session) redirect("/login?next=/dashboard");
 
   const { supabase, user } = session;
 
-  const [profileResult, streakResult, attemptsResult] = await Promise.all([
+  const [profileResult, streakResult, attemptsResult, catalogueResult] = await Promise.all([
     supabase
       .from("profiles")
       .select(
@@ -86,25 +90,34 @@ export default async function DashboardPage() {
     supabase
       .from("challenge_attempts")
       .select(
-        "id, score, created_at, practice_date, time_spent_seconds, challenges(title, category, difficulty, slug)"
+        "id, challenge_id, score, created_at, practice_date, time_spent_seconds, challenges(title, category, difficulty, slug)"
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
-      .limit(60),
+      .limit(120),
+    supabase
+      .from("challenges")
+      .select("id, slug, title, description, difficulty, category, estimated_minutes, time_limit_seconds")
+      .eq("is_active", true),
   ]);
 
   const profile = profileResult.data;
   const streak = streakResult.data;
   const attempts = (attemptsResult.data ?? []) as AttemptRow[];
 
+  const scoredAttempts: ScoredAttempt[] = attempts.map((attempt) => ({
+    score: attempt.score,
+    practice_date: attempt.practice_date,
+    created_at: attempt.created_at,
+    category: attemptChallenge(attempt)?.category ?? null,
+  }));
+
   const days = lastDays(14);
   const practicedDays = new Set(attempts.map((attempt) => attempt.practice_date));
-  const last30 = recentPracticeDays(attempts, 30);
-  const consistency = Math.round((last30.size / 30) * 100);
-  const scored = attempts.filter((attempt) => typeof attempt.score === "number");
-  const averageScore = scored.length
-    ? Math.round(scored.reduce((total, attempt) => total + (attempt.score ?? 0), 0) / scored.length)
-    : null;
+  const weekly = consistencyTrend(scoredAttempts, 7);
+  const scores = scoreTrend(scoredAttempts, 5);
+  const overall = progressFor(scoredAttempts);
+  const levels = levelsByCategory(scoredAttempts);
 
   const today = isoDay(new Date());
   const practicedToday = practicedDays.has(today);
@@ -112,9 +125,34 @@ export default async function DashboardPage() {
     ? attempts.find((attempt) => attempt.practice_date === today) ?? null
     : null;
   const currentStreak = streak?.current_streak ?? 0;
-
   const streakAtRisk = !practicedToday && streak?.last_practice_date === previousDayIso();
-  const streakLapsed = !practicedToday && currentStreak === 0;
+  const milestone = nextMilestone(currentStreak);
+
+  const recommendation = recommendNext({
+    challenges: (catalogueResult.data ?? []).map((row) => ({
+      id: row.id as string,
+      slug: row.slug as string,
+      title: row.title as string,
+      description: row.description as string,
+      difficulty: row.difficulty as Challenge["difficulty"],
+      category: row.category as string,
+      estimated_minutes: row.estimated_minutes as number,
+      time_limit_seconds: (row.time_limit_seconds as number | null) ?? null,
+      content: {},
+      rubric: {},
+    })),
+    attempts: attempts.map((attempt) => ({
+      challenge_id: attempt.challenge_id,
+      category: attemptChallenge(attempt)?.category ?? null,
+      score: attempt.score,
+      practice_date: attempt.practice_date,
+      created_at: attempt.created_at,
+    })),
+  });
+
+  const skills = Array.from(levels.entries())
+    .sort((a, b) => b[1].days - a[1].days)
+    .slice(0, 3);
 
   const recent = attempts.slice(0, 6);
   const needsConsent = !profile?.consent_at;
@@ -176,80 +214,119 @@ export default async function DashboardPage() {
           </div>
         ) : null}
 
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className={eyebrowStyles}>Your record</p>
-            <h1 className="mt-2 text-[30px] font-semibold leading-tight tracking-tight text-foreground">
-              {profile?.display_name ?? "You"} {currentStreak > 0 ? `· day ${currentStreak}` : ""}
-            </h1>
-            <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-              {practicedToday
-                ? todayAttempt?.score
-                  ? `Today is logged. Score ${todayAttempt.score}. Tomorrow is what keeps the record alive.`
-                  : "Today is logged. The streak holds."
-                : streakAtRisk
-                  ? "Nothing logged today and the streak is from yesterday — one short session keeps it."
-                  : streakLapsed
-                    ? "No session logged today. Start with something small; the record begins at one day."
-                    : "Today is still open. One short session is enough to keep the day."}
-            </p>
-          </div>
+        <p className={eyebrowStyles}>Your record</p>
+        <h1 className="mt-2 text-[30px] font-semibold leading-tight tracking-tight text-foreground">
+          {profile?.display_name ?? "You"}
+        </h1>
+        <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.1em] text-muted">
+          {overall.level.name} · {overall.days} days practised · {attempts.length} attempts
+        </p>
 
-          <div className="flex shrink-0 flex-wrap gap-3">
-            <Link href="/practice" className={buttonStyles("primary", "md")}>
-              {practicedToday ? "Practise again" : "Start today's challenge"}
-            </Link>
-            {practicedToday && todayAttempt ? (
+        {/* The single most important block: what to do next, and why. */}
+        <section className="mt-8 rounded border border-card-border bg-card p-6">
+          <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+            <div className="max-w-lg">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                {practicedToday ? "Today is logged" : "Today"}
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-foreground">
+                {practicedToday
+                  ? todayAttempt?.score !== null && todayAttempt?.score !== undefined
+                    ? `Score ${todayAttempt.score}. ${
+                        streakAtRisk
+                          ? "Tomorrow is what keeps this going."
+                          : "The streak holds — one session a day is the whole trick."
+                      }`
+                    : "Logged. The streak holds."
+                  : streakAtRisk
+                    ? "Nothing logged today and the streak is from yesterday — one short session keeps it."
+                    : currentStreak === 0
+                      ? "No session logged today. Start with something small; the record begins at one day."
+                      : "Today is still open. One short session is enough to keep the day."}
+              </p>
+
+              {recommendation ? (
+                <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                  Next: <span className="text-foreground">{recommendation.challenge.title}</span> —{" "}
+                  {recommendation.reason}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex shrink-0 flex-wrap gap-3">
               <Link
-                href={`/practice/${attemptChallenge(todayAttempt)?.slug ?? ""}/result/${todayAttempt.id}`}
-                className={buttonStyles("secondary", "md")}
+                href={recommendation ? `/practice/${recommendation.challenge.slug}` : "/practice"}
+                className={buttonStyles("primary", "md")}
               >
-                Review today
+                {practicedToday ? "Practise again" : "Start today's challenge"}
               </Link>
-            ) : null}
+              {practicedToday && todayAttempt ? (
+                <Link
+                  href={`/practice/${attemptChallenge(todayAttempt)?.slug ?? ""}/result/${todayAttempt.id}`}
+                  className={buttonStyles("secondary", "md")}
+                >
+                  Review today
+                </Link>
+              ) : (
+                <Link href="/practice" className={buttonStyles("secondary", "md")}>
+                  Browse
+                </Link>
+              )}
+            </div>
           </div>
-        </div>
+        </section>
 
-        <div className="mt-10 grid gap-px overflow-hidden rounded border border-card-border bg-card-border sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-6 grid gap-px overflow-hidden rounded border border-card-border bg-card-border sm:grid-cols-2 lg:grid-cols-4">
           <div className="bg-card p-5">
-            <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">Current streak</p>
-            <p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight text-foreground">
+            <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">Streak</p>
+            <p className="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-foreground">
               {currentStreak}
             </p>
             <p className={`mt-1 text-xs ${streakAtRisk ? "text-accent" : "text-muted"}`}>
               {practicedToday
-                ? "logged today"
+                ? milestone
+                  ? `${milestone - currentStreak} to ${milestone}`
+                  : "logged today"
                 : streakAtRisk
-                  ? "at risk — not logged today"
+                  ? "at risk — log today"
                   : "days in a row"}
             </p>
           </div>
+
           <div className="bg-card p-5">
-            <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">Longest streak</p>
-            <p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight text-foreground">
-              {streak?.longest_streak ?? 0}
-            </p>
-            <p className="mt-1 text-xs text-muted">personal best</p>
-          </div>
-          <div className="bg-card p-5">
-            <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">Consistency</p>
-            <p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight text-foreground">
-              {consistency}%
-            </p>
-            <p className="mt-1 text-xs text-muted">{last30.size} of the last 30 days</p>
-          </div>
-          <div className="bg-card p-5">
-            <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">Average score</p>
-            <p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight text-foreground">
-              {averageScore ?? "—"}
+            <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">This week</p>
+            <p className="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-foreground">
+              {weekly.thisWindow}
+              <span className="text-base font-normal text-muted">/7</span>
             </p>
             <p className="mt-1 text-xs text-muted">
-              {scored.length} scored {scored.length === 1 ? "attempt" : "attempts"}
+              days practised · {deltaLabel(weekly.delta)} vs last week
             </p>
+          </div>
+
+          <div className="bg-card p-5">
+            <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">Recent average</p>
+            <p className="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-foreground">
+              {scores.recent ?? "—"}
+            </p>
+            <p className="mt-1 text-xs text-muted">
+              {scores.previous === null
+                ? `last ${Math.min(5, attempts.length)} attempts`
+                : `${deltaLabel(scores.delta)} vs previous five`}
+            </p>
+          </div>
+
+          <div className="bg-card p-5">
+            <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">Level</p>
+            <p className="mt-2 text-lg font-semibold tracking-tight text-foreground">{overall.level.name}</p>
+            <div className="mt-2 h-1 overflow-hidden rounded-full bg-foreground/10">
+              <div className="h-full rounded-full bg-accent" style={{ width: `${overall.percent}%` }} />
+            </div>
+            <p className="mt-1.5 text-xs leading-relaxed text-muted">{overall.requirement}</p>
           </div>
         </div>
 
-        <section className="mt-10 rounded border border-card-border bg-card p-6">
+        <section className="mt-6 rounded border border-card-border bg-card p-6">
           <div className="flex items-baseline justify-between">
             <h2 className="text-sm font-medium text-foreground">Last 14 days</h2>
             <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
@@ -277,7 +354,35 @@ export default async function DashboardPage() {
           </p>
         </section>
 
-        <div className="mt-10 grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+        {skills.length > 0 ? (
+          <section className="mt-6 rounded border border-card-border bg-card p-6">
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-sm font-medium text-foreground">Skill levels</h2>
+              <Link href="/practice" className="text-xs text-muted-foreground hover:text-foreground">
+                All skills
+              </Link>
+            </div>
+
+            <div className="mt-5 space-y-5">
+              {skills.map(([category, level]) => (
+                <div key={category}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-sm text-foreground">{skillLabel(category)}</p>
+                    <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                      {level.level.name} · {level.days} days · avg {level.average ?? "—"}
+                    </p>
+                  </div>
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-foreground/10">
+                    <div className="h-full rounded-full bg-primary" style={{ width: `${level.percent}%` }} />
+                  </div>
+                  <p className="mt-1.5 text-xs leading-relaxed text-muted">{level.requirement}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <div className="mt-6 grid gap-6 lg:grid-cols-[1.6fr_1fr]">
           <section className="rounded border border-card-border bg-card">
             <div className="flex items-baseline justify-between border-b border-card-border px-6 py-4">
               <h2 className="text-sm font-medium text-foreground">Recent sessions</h2>
@@ -336,18 +441,6 @@ export default async function DashboardPage() {
 
           <aside className="space-y-6">
             <div className="rounded border border-card-border bg-card p-6">
-              <p className={eyebrowStyles}>Today</p>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                {practicedToday
-                  ? "Logged. Consistency is the signal recruiters trust most — do not break the chain."
-                  : "A 5–15 minute session is enough to keep the day. Quality beats duration."}
-              </p>
-              <Link href="/practice" className={buttonStyles("primary", "md", "mt-5 w-full")}>
-                {practicedToday ? "Practise again" : "Open practice"}
-              </Link>
-            </div>
-
-            <div className="rounded border border-card-border bg-card p-6">
               <p className={eyebrowStyles}>Visibility</p>
               <p className="mt-3 text-sm capitalize text-foreground">
                 {profile?.visibility === "recruiters_only"
@@ -357,19 +450,42 @@ export default async function DashboardPage() {
                     : "Private"}
               </p>
               <p className="mt-1 text-xs leading-relaxed text-muted">
-                Your email is never shown to recruiters. Scores and consistency are what they see.
+                Recruiters see skill levels, consistency and recent activity — never your email.
               </p>
               <Link href="/settings" className={buttonStyles("secondary", "sm", "mt-4")}>
                 Change visibility
+              </Link>
+            </div>
+
+            <div className="rounded border border-card-border bg-card p-6">
+              <p className={eyebrowStyles}>Record</p>
+              <dl className="mt-3 space-y-2 text-sm">
+                <div className="flex items-baseline justify-between">
+                  <dt className="text-muted-foreground">Longest streak</dt>
+                  <dd className="tabular-nums text-foreground">{streak?.longest_streak ?? 0}</dd>
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <dt className="text-muted-foreground">Days practised</dt>
+                  <dd className="tabular-nums text-foreground">{streak?.total_practice_days ?? 0}</dd>
+                </div>
+                <div className="flex items-baseline justify-between">
+                  <dt className="text-muted-foreground">Scored attempts</dt>
+                  <dd className="tabular-nums text-foreground">
+                    {attempts.filter((attempt) => typeof attempt.score === "number").length}
+                  </dd>
+                </div>
+              </dl>
+              <Link href="/profile" className={buttonStyles("ghost", "sm", "mt-4")}>
+                Open skill record
               </Link>
             </div>
           </aside>
         </div>
 
         <p className="mt-10 border-t border-card-border pt-6 text-xs leading-relaxed text-muted">
-          Scores are computed from the challenge rubric on the server, and attempt duration comes from a
-          server-written session — not from the browser. Attempts are immutable: editing history would destroy
-          the only thing that makes this record worth trusting.
+          Scores come from the challenge rubric; duration comes from a server-written session. Levels are
+          earned from days practised and the quality of your recent attempts — there is no XP to farm and no
+          way to buy a level. Attempts are immutable.
         </p>
       </main>
     </div>

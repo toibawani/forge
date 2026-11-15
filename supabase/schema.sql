@@ -777,16 +777,24 @@ where p.deleted_at is null
     or (p.visibility = 'recruiters_only' and public.is_recruiter())
   );
 
-create or replace view public.skill_signals
+-- Dropped and recreated because the column set changed: recruiters need
+-- recency and consistency, not just a lifetime average.
+drop view if exists public.skill_signals;
+
+create view public.skill_signals
 with (security_invoker = false)
 as
 select
   a.user_id,
   c.category,
+  count(*)::int as total_attempts,
   count(*) filter (where a.created_at > now() - interval '30 days')::int as attempts_30d,
+  count(distinct a.practice_date) filter (where a.created_at > now() - interval '30 days')::int as days_30d,
   round(avg(a.score) filter (where a.created_at > now() - interval '30 days'))::int as avg_score_30d,
+  round(avg(a.score) filter (where a.created_at > now() - interval '90 days'))::int as avg_score_90d,
   max(a.score) as best_score,
-  count(distinct a.practice_date)::int as active_days,
+  count(distinct a.practice_date)
+    filter (where a.score >= 70 and a.created_at > now() - interval '90 days')::int as strong_days_90d,
   max(a.created_at) as last_attempt_at
 from public.challenge_attempts a
 join public.challenges c on c.id = a.challenge_id
