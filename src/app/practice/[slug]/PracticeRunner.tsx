@@ -81,11 +81,13 @@ export function PracticeRunner({
       });
   }, [challenge.id]);
 
-  // Restoring a draft is a read from an external store (sessionStorage), so it
-  // belongs at mount, before the user can type over it.
+  // Restoring a draft is a read from an external store (localStorage), so it
+  // belongs at mount, before the user can type over it. localStorage rather
+  // than sessionStorage: a closed tab or a crashed browser should not lose work
+  // the user has already done.
   const restoreDraft = useCallback(() => {
     try {
-      const draft = window.sessionStorage.getItem(storageKey);
+      const draft = window.localStorage.getItem(storageKey);
       if (draft) setAnswer(draft);
     } catch {
       // Private mode without storage: the runner still works.
@@ -122,8 +124,8 @@ export function PracticeRunner({
     answerRef.current = answer;
     const handle = window.setTimeout(() => {
       try {
-        if (answer.trim()) window.sessionStorage.setItem(storageKey, answer);
-        else window.sessionStorage.removeItem(storageKey);
+        if (answer.trim()) window.localStorage.setItem(storageKey, answer);
+        else window.localStorage.removeItem(storageKey);
       } catch {
         // ignore quota / private mode
       }
@@ -186,7 +188,7 @@ export function PracticeRunner({
 
       submittedRef.current = true;
       try {
-        window.sessionStorage.removeItem(storageKey);
+        window.localStorage.removeItem(storageKey);
       } catch {
         // ignore
       }
@@ -289,6 +291,7 @@ export function PracticeRunner({
           }}
           rows={14}
           spellCheck
+          autoFocus
           disabled={!session || expired}
           placeholder={
             challenge.category === "engineering"
@@ -299,8 +302,8 @@ export function PracticeRunner({
         />
 
         <p className="mt-2 text-xs text-muted">
-          Drafts are saved in this browser only and cleared after submission. The rubric rewards substance and
-          structure, not length.
+          Your draft is kept on this device and cleared once the attempt is submitted. The rubric rewards
+          substance and structure, not length.
         </p>
       </section>
 
@@ -363,13 +366,23 @@ export function PracticeRunner({
             >
               {clockLabel(elapsed)}
             </span>
-            <span className="hidden font-mono text-[10px] uppercase tracking-[0.12em] text-muted sm:inline">
-              {timeLimitReached
-                ? "past the time limit"
-                : overEstimate
+            {challenge.time_limit_seconds !== null ? (
+              <span
+                className={`font-mono text-[10px] uppercase tracking-[0.12em] ${
+                  timeLimitReached ? "text-destructive" : "text-muted"
+                }`}
+              >
+                {timeLimitReached
+                  ? "over the limit — submit now"
+                  : `${clockLabel(Math.max(0, challenge.time_limit_seconds - elapsed))} left`}
+              </span>
+            ) : (
+              <span className="hidden font-mono text-[10px] uppercase tracking-[0.12em] text-muted sm:inline">
+                {overEstimate
                   ? "past the estimate — finish the thought"
                   : `est. ${challenge.estimated_minutes} min`}
-            </span>
+              </span>
+            )}
           </div>
 
           <button
