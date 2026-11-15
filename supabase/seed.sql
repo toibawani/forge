@@ -59,3 +59,96 @@ values
     600
   )
 on conflict (slug) do nothing;
+
+-- Additional catalogue: each discipline now has a beginner → advanced path.
+insert into public.challenges (slug, title, description, difficulty, category, estimated_minutes, content, rubric, time_limit_seconds)
+values
+  (
+    'code-race-condition',
+    'Find the race condition',
+    'A booking endpoint checks availability and then inserts, in two separate statements. Explain the window, name the failure mode under concurrent requests, and describe the smallest correct fix.',
+    'advanced',
+    'engineering',
+    14,
+    '{"language":"typescript","given":"const open = await seats.available(slotId);\nif (open > 0) {\n  await seats.book(slotId, userId);\n}","prompt":"Identify the race, then give the smallest change that makes it correct under concurrency.","constraints":["name the isolation or locking mechanism","<= 200 words"]}'::jsonb,
+    '{"signals":["correctness","concurrency reasoning","specificity"],"min_words":60}'::jsonb,
+    1500
+  ),
+  (
+    'code-api-contract',
+    'Design the error contract',
+    'Given a REST endpoint that currently returns 200 with { error: "..." } on failure, specify a consistent error shape and the status codes for validation, auth, not-found and rate limiting.',
+    'intermediate',
+    'engineering',
+    10,
+    '{"prompt":"Write the JSON error contract and map four failure cases to status codes.","constraints":["no stack traces in responses","stable machine-readable codes"]}'::jsonb,
+    '{"signals":["consistency","clarity","specificity"],"min_words":50}'::jsonb,
+    1200
+  ),
+  (
+    'design-form-error-states',
+    'Design the error states',
+    'A settings form has six fields and a save button. Specify what the user sees for a single-field validation error, a server failure, and a partial save. Include placement and copy.',
+    'intermediate',
+    'design',
+    12,
+    '{"deliverable":"annotated spec","constraints":["no modals","one primary action","errors adjacent to the field they belong to"]}'::jsonb,
+    '{"signals":["hierarchy","copy","restraint"],"min_words":50}'::jsonb,
+    1200
+  ),
+  (
+    'design-density-review',
+    'Cut the dashboard density',
+    'A dashboard shows 14 metrics. Choose the four that belong above the fold, justify each cut, and say where the removed metrics should live instead.',
+    'advanced',
+    'design',
+    15,
+    '{"deliverable":"four kept metrics + rationale + placement for the rest","constraints":["justify by decision usefulness, not by aesthetics"]}'::jsonb,
+    '{"signals":["prioritisation","rationale","clarity"],"min_words":60}'::jsonb,
+    1500
+  ),
+  (
+    'data-ab-test-read',
+    'Read the A/B result',
+    'Control converts at 4.1% on 9,800 users, variant at 4.6% on 9,700. State the observed lift, whether it is distinguishable from noise, and the decision you would actually make.',
+    'intermediate',
+    'analysis',
+    12,
+    '{"prompt":"Give lift, noise assessment, and a recommendation with one caveat.","constraints":["show the arithmetic","no p-values without a method"]}'::jsonb,
+    '{"signals":["statistical honesty","decisiveness"],"min_words":55}'::jsonb,
+    1200
+  ),
+  (
+    'data-metric-definition',
+    'Define the metric',
+    'Define "weekly active practitioner" precisely enough that two engineers would compute the same number, including edge cases for deleted accounts and duplicate attempts in a day.',
+    'beginner',
+    'analysis',
+    8,
+    '{"prompt":"Write the definition, the SQL-shaped logic in words, and two edge cases.","constraints":["no vague adjectives"]}'::jsonb,
+    '{"signals":["precision","edge cases"],"min_words":45}'::jsonb,
+    900
+  ),
+  (
+    'writing-decision-memo',
+    'Write the decision memo',
+    'Your team must choose between fixing the legacy importer and rewriting it. Write a one-page memo recommending one path, with the cost of being wrong.',
+    'intermediate',
+    'writing',
+    10,
+    '{"input":"Legacy importer: 3 years old, 40% of support tickets, two engineers understand it. Rewrite: 6 weeks, no tickets from the new path expected, but risky before the audit.","prompt":"Recommend one option and state the cost of being wrong.","constraints":["<= 220 words","no hedging"]}'::jsonb,
+    '{"signals":["decisiveness","structure","specificity"],"min_words":60}'::jsonb,
+    1200
+  ),
+  (
+    'writing-incident-update',
+    'Write the incident update',
+    'At 30 minutes into an outage you know: the cause is a bad migration, rollback is in progress, 12% of requests are failing, and no data was lost. Write the customer-facing update.',
+    'advanced',
+    'writing',
+    12,
+    '{"prompt":"Write the update as it would be sent now, not after resolution.","constraints":["state what is known and unknown","no blame","give the next update time"]}'::jsonb,
+    '{"signals":["clarity","honesty","completeness"],"min_words":60}'::jsonb,
+    1500
+  )
+on conflict (slug) do nothing;
