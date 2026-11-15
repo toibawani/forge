@@ -25,6 +25,22 @@ hard to fake and easy to compare over time.
 A streak is evidence that you showed up. A score is rubric-scored substance, not a hidden model's
 guess. The product says that plainly rather than overselling it.
 
+### Feedback, levels and what comes next
+
+- **Feedback is measured, not generated.** After an attempt the server derives specific observations
+  from the answer itself — paragraph count, concrete figures, code references, hedging, vague
+  quantifiers — and turns them into "what worked" and "what to change" with one focus instruction.
+  Stored with the attempt, so an export still explains itself later.
+- **Levels are earned.** Foundations → Practising → Consistent → Proficient → Proven, requiring both
+  days practised *and* the average of your most recent scored attempts. There is no XP to farm and
+  repeating easy challenges lowers your average rather than inflating a number.
+- **Recommendations state their reason.** The next challenge is chosen by rotation (two sessions in
+  one skill is a rut), weakest area, then the difficulty your level actually earned. The reason is
+  shown, so the recommendation can be argued with.
+- **Recruiter signals favour the present.** `skill_signals` exposes recency and consistency
+  (`days_30d`, `strong_days_90d`, `avg_score_90d`, `last_attempt_at`), and search ranks by recent
+  activity rather than a lifetime streak.
+
 ## Tech stack
 
 | Layer | Choice |
@@ -203,6 +219,9 @@ src/
 │   ├── env.ts                          public/server env separation
 │   ├── request-meta.ts                 salted IP hashing, breach references
 │   ├── scoring.ts                      rubric v1 (deterministic, explainable)
+│   ├── feedback.ts                      mentor feedback derived from the answer
+│   ├── progression.ts                   earned levels, trends, milestones
+│   ├── challenges.ts                    catalogue helpers + reasoned recommendation
 │   ├── supabase/{server,client,admin}.ts
 │   ├── validations.ts                  Zod schemas
 │   ├── rate-limit.ts, logger.ts, audit-logger.ts
