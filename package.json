@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test src/lib/scoring.test.ts src/lib/feedback.test.ts src/lib/progression.test.ts src/lib/challenges.test.ts src/lib/recruiter.test.ts src/lib/validations.test.ts src/lib/review.test.ts src/lib/benchmark.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/scoring.test.ts src/lib/feedback.test.ts src/lib/progression.test.ts src/lib/challenges.test.ts src/lib/recruiter.test.ts src/lib/validations.test.ts src/lib/review.test.ts src/lib/benchmark.test.ts src/lib/integrity.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

@@ -185,6 +185,7 @@ It processes due deletions, records accountability rows, runs retention cleanup,
 /settings                profile, consent register, export, data requests, delete account
 /privacy, /privacy/hindi policy in English and Hindi
 /terms                   terms of service
+/status                  human-readable deployment health (same checks as /api/health)
 
 POST   /api/auth/signup | login | logout | forgot-password | reset-password
 GET    /api/auth/…       (session cookie based, httpOnly)

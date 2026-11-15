@@ -166,20 +166,38 @@ export function apiRoute(
 
   return async (request: NextRequest): Promise<NextResponse> => {
     const requestId = crypto.randomUUID();
+    const startedAt = Date.now();
+
+    // One line per request: method, path, status, duration. No query strings
+    // (they can carry filters that look like data), no bodies, no headers.
+    const logRequest = (response: NextResponse, userId?: string): NextResponse => {
+      logger.info(
+        "api_request",
+        {
+          method: request.method,
+          path: request.nextUrl.pathname,
+          status: response.status,
+          ms: Date.now() - startedAt,
+        },
+        userId,
+        requestId
+      );
+      return response;
+    };
 
     try {
       if (!isSupabaseConfigured()) {
-        return fail(503, "not_configured", "Forge is not connected to its database yet.");
+        return logRequest(fail(503, "not_configured", "Forge is not connected to its database yet."));
       }
 
       if (options.mutation && !isSameOrigin(request)) {
         logger.warn("Blocked cross-origin mutation", { path: request.nextUrl.pathname }, undefined, requestId);
-        return fail(403, "cross_origin", "This request did not come from Forge.");
+        return logRequest(fail(403, "cross_origin", "This request did not come from Forge."));
       }
 
       const supabase = await createSupabaseServerClient();
       if (!supabase) {
-        return fail(503, "not_configured", "Forge is not connected to its database yet.");
+        return logRequest(fail(503, "not_configured", "Forge is not connected to its database yet."));
       }
 
       const {
@@ -188,28 +206,32 @@ export function apiRoute(
       } = await supabase.auth.getUser();
 
       if (authMode === "required" && (!user || authError)) {
-        return fail(401, "unauthenticated", "Sign in to continue.");
+        return logRequest(fail(401, "unauthenticated", "Sign in to continue."));
       }
 
       if (authMode !== "required" && authMode !== "optional") {
         // Public routes get a synthetic empty context; no profile fetch.
-        return await handler({
-          request,
-          requestId,
-          supabase,
-          user: null as unknown as User,
-          profile: null as unknown as SessionProfile,
-        });
+        return logRequest(
+          await handler({
+            request,
+            requestId,
+            supabase,
+            user: null as unknown as User,
+            profile: null as unknown as SessionProfile,
+          })
+        );
       }
 
       if (!user) {
-        return await handler({
-          request,
-          requestId,
-          supabase,
-          user: null as unknown as User,
-          profile: null as unknown as SessionProfile,
-        });
+        return logRequest(
+          await handler({
+            request,
+            requestId,
+            supabase,
+            user: null as unknown as User,
+            profile: null as unknown as SessionProfile,
+          })
+        );
       }
 
       const { data: profileRow, error: profileError } = await supabase
@@ -233,22 +255,24 @@ export function apiRoute(
       };
 
       if (profile.deletion_requested_at && !options.allowPendingDeletion) {
-        return fail(
-          409,
-          "account_scheduled_for_deletion",
-          "This account is scheduled for deletion. Cancel the request before making changes."
+        return logRequest(
+          fail(
+            409,
+            "account_scheduled_for_deletion",
+            "This account is scheduled for deletion. Cancel the request before making changes."
+          )
         );
       }
 
       if (options.roles && !options.roles.includes(profile.role)) {
         logger.warn("Role check failed", { role: profile.role, path: request.nextUrl.pathname }, user.id, requestId);
-        return fail(403, "forbidden", "You do not have access to this resource.");
+        return logRequest(fail(403, "forbidden", "You do not have access to this resource."), user.id);
       }
 
-      return await handler({ request, requestId, supabase, user, profile });
+      return logRequest(await handler({ request, requestId, supabase, user, profile }), user.id);
     } catch (error) {
       if (error instanceof HttpError) {
-        return fail(error.status, error.code, error.message, error.details);
+        return logRequest(fail(error.status, error.code, error.message, error.details));
       }
 
       logger.error(
@@ -261,7 +285,7 @@ export function apiRoute(
         requestId
       );
 
-      return fail(500, "internal_error", "Something went wrong on our side.", { requestId });
+      return logRequest(fail(500, "internal_error", "Something went wrong on our side.", { requestId }));
     }
   };
 }

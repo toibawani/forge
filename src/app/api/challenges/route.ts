@@ -2,6 +2,7 @@ import { apiRoute, created, fail, ok, readJson } from "@/lib/api";
 import { challengeAttemptSchema } from "@/lib/validations";
 import { scoreSubmission, type Rubric } from "@/lib/scoring";
 import { buildFeedback } from "@/lib/feedback";
+import { assessAttempt } from "@/lib/integrity";
 import { hashIp, requestIp } from "@/lib/request-meta";
 import { rateLimit } from "@/lib/rate-limit";
 import { logAuditEvent } from "@/lib/audit-logger";
@@ -120,6 +121,10 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
     category: challenge.category,
   });
 
+  // Signals, not a verdict: flags are recorded with the attempt and can be
+  // reviewed later. Nothing here rejects the submission.
+  const integrity = assessAttempt({ answer: input.answer, seconds: elapsedSeconds });
+
   const { data: attempt, error: insertError } = await supabase
     .from("challenge_attempts")
     .insert({
@@ -129,6 +134,7 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
         answer: input.answer,
         scoring: breakdown,
         feedback,
+        integrity,
       },
       score: breakdown.score,
       time_spent_seconds: elapsedSeconds,
@@ -175,7 +181,11 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
     action: "practice_recorded",
     resourceType: "challenge_attempts",
     resourceId: attempt.id,
-    details: { challengeId: challenge.id, score: breakdown.score },
+    details: {
+      challengeId: challenge.id,
+      score: breakdown.score,
+      integrityFlags: integrity.flags,
+    },
     ipHash,
     actorRole: profile.role,
   });
