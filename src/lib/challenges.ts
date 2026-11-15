@@ -183,6 +183,205 @@ export function recommendChallenge(
   })[0];
 }
 
+export type SelectionAttempt = {
+  challenge_id: string;
+  category: string | null;
+  score: number | null;
+  practice_date: string;
+  created_at: string;
+};
+
+export type Recommendation = {
+  challenge: Challenge;
+  reason: string;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Picks the next challenge with a stated reason.
+ *
+ * Order of concern: finish what you started (don't let one skill dominate), fix
+ * the weakest area, then match difficulty to the level you actually earned. The
+ * reason is shown in the UI — a recommendation nobody can explain is just a
+ * billboard.
+ */
+export function recommendNext({
+  challenges,
+  attempts,
+  now = Date.now(),
+}: {
+  challenges: Challenge[];
+  attempts: SelectionAttempt[];
+  now?: number;
+}): Recommendation | null {
+  if (challenges.length === 0) return null;
+
+  const ordered = [...attempts].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const categories = Array.from(new Set(challenges.map((challenge) => challenge.category)));
+
+  const stats = new Map<string, { count: number; scores: number[]; lastAt: string }>();
+  for (const attempt of ordered) {
+    if (!attempt.category) continue;
+    const entry = stats.get(attempt.category) ?? { count: 0, scores: [], lastAt: "" };
+    entry.count += 1;
+    if (typeof attempt.score === "number") entry.scores.push(attempt.score);
+    if (!entry.lastAt) entry.lastAt = attempt.created_at;
+    stats.set(attempt.category, entry);
+  }
+
+  const averageOf = (scores: number[]) =>
+    scores.length === 0 ? null : Math.round(scores.reduce((total, score) => total + score, 0) / scores.length);
+
+  const overallScores = ordered
+    .map((attempt) => attempt.score)
+    .filter((score): score is number => typeof score === "number");
+  const overallAverage = averageOf(overallScores);
+
+  // Rotation: two sessions in one skill in a row is a rut, not a record.
+  const recentCategories = ordered.slice(0, 2).map((attempt) => attempt.category);
+  const stuck =
+    recentCategories.length === 2 &&
+    recentCategories[0] !== null &&
+    recentCategories[0] === recentCategories[1];
+
+  let target = preferredCategoryOrNull(ordered, categories);
+  let reason: string | null = null;
+
+  if (stuck && categories.length > 1) {
+    const alternatives = categories.filter((category) => category !== recentCategories[0]);
+    target = weakestCategory(alternatives, stats, averageOf) ?? alternatives[0];
+    reason = `Your last two sessions stayed in ${skillLabel(recentCategories[0] as string)}. Breadth across skills is part of the signal, so this moves you to ${skillLabel(target)}.`;
+  } else {
+    const weakest = weakestCategory(
+      categories,
+      stats,
+      averageOf,
+      overallAverage === null ? undefined : overallAverage - 5
+    );
+
+    if (weakest && weakest !== target) {
+      const weakestAverage = averageOf(stats.get(weakest)?.scores ?? []);
+      target = weakest;
+      reason = `${skillLabel(weakest)} is your weakest area right now${
+        weakestAverage === null ? "" : ` (average ${weakestAverage})`
+      }. Improving the low end moves your whole record more than another strong session would.`;
+    }
+  }
+
+  const category = target ?? categories[0];
+  const inCategory = challenges.filter((challenge) => challenge.category === category);
+  const pool = inCategory.length > 0 ? inCategory : challenges;
+
+  const categoryAttempts = ordered.filter((attempt) => attempt.category === category);
+  const level = levelIndexFor(categoryAttempts);
+  const difficulty = targetDifficulty(level);
+
+  const atLevel = pool.filter((challenge) => challenge.difficulty === difficulty);
+  const candidates = atLevel.length > 0 ? atLevel : pool;
+
+  const counts = new Map<string, number>();
+  const lastSeen = new Map<string, string>();
+  for (const attempt of ordered) {
+    counts.set(attempt.challenge_id, (counts.get(attempt.challenge_id) ?? 0) + 1);
+    if (!lastSeen.has(attempt.challenge_id)) lastSeen.set(attempt.challenge_id, attempt.created_at);
+  }
+
+  // Do not hand back a challenge attempted in the last week unless it is the
+  // only thing at this level.
+  const fresh = candidates.filter((challenge) => {
+    const last = lastSeen.get(challenge.id);
+    return !last || now - new Date(last).getTime() > 7 * DAY_MS;
+  });
+  const shortlist = fresh.length > 0 ? fresh : candidates;
+
+  const challenge = [...shortlist].sort((a, b) => {
+    const attemptDiff = (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0);
+    if (attemptDiff !== 0) return attemptDiff;
+    const lastDiff = (lastSeen.get(a.id) ?? "").localeCompare(lastSeen.get(b.id) ?? "");
+    if (lastDiff !== 0) return lastDiff;
+    return DIFFICULTY_ORDER[a.difficulty] - DIFFICULTY_ORDER[b.difficulty];
+  })[0];
+
+  return {
+    challenge,
+    reason:
+      reason ??
+      (categoryAttempts.length === 0
+        ? `Begin with ${skillLabel(category)}. The first session sets your baseline, and the level you reach is earned from there.`
+        : `${skillLabel(category)} at ${difficulty} level — where your record stands.`),
+  };
+}
+
+function preferredCategoryOrNull(
+  ordered: SelectionAttempt[],
+  categories: string[]
+): string | null {
+  const counts = new Map<string, number>();
+  for (const attempt of ordered) {
+    if (!attempt.category) continue;
+    counts.set(attempt.category, (counts.get(attempt.category) ?? 0) + 1);
+  }
+
+  const ranked = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  if (ranked.length > 0) return ranked[0][0];
+  return categories[0] ?? null;
+}
+
+function weakestCategory(
+  categories: string[],
+  stats: Map<string, { count: number; scores: number[]; lastAt: string }>,
+  averageOf: (scores: number[]) => number | null,
+  threshold?: number
+): string | null {
+  let weakest: { category: string; average: number } | null = null;
+
+  for (const category of categories) {
+    const entry = stats.get(category);
+    if (!entry || entry.scores.length < 2) continue;
+    const average = averageOf(entry.scores);
+    if (average === null) continue;
+    if (!weakest || average < weakest.average) weakest = { category, average };
+  }
+
+  if (!weakest) return null;
+  if (threshold !== undefined && weakest.average >= threshold) return null;
+  return weakest.category;
+}
+
+function levelIndexFor(attempts: SelectionAttempt[]): number {
+  const days = new Set(attempts.map((attempt) => attempt.practice_date)).size;
+  const recent = attempts
+    .filter((attempt) => typeof attempt.score === "number")
+    .slice(0, 10)
+    .map((attempt) => attempt.score as number);
+  const average = recent.length
+    ? Math.round(recent.reduce((total, score) => total + score, 0) / recent.length)
+    : null;
+
+  let index = 0;
+  const thresholds = [
+    { days: 3, average: 55 },
+    { days: 8, average: 65 },
+    { days: 16, average: 75 },
+    { days: 30, average: 82 },
+  ];
+
+  thresholds.forEach((threshold, position) => {
+    if (days >= threshold.days && average !== null && average >= threshold.average) {
+      index = position + 1;
+    }
+  });
+
+  return index;
+}
+
+function targetDifficulty(levelIndex: number): "beginner" | "intermediate" | "advanced" {
+  if (levelIndex <= 1) return "beginner";
+  if (levelIndex === 2) return "intermediate";
+  return "advanced";
+}
+
 export function minutesLabel(seconds: number): string {
   const minutes = Math.max(1, Math.round(seconds / 60));
   return `${minutes} min`;
