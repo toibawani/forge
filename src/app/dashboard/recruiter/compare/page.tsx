@@ -5,6 +5,7 @@ import { getServerUser } from "@/lib/supabase/server";
 import { buttonStyles, eyebrowStyles } from "@/components/ui/styles";
 import { skillLabel } from "@/lib/challenges";
 import { summariseCandidate, type Candidate } from "@/lib/recruiter";
+import { reviewSummary, type ReviewCounts } from "@/lib/review";
 
 export const metadata: Metadata = {
   title: "Compare candidates — Forge",
@@ -63,7 +64,7 @@ export default async function ComparePage({
     );
   }
 
-  const [cardsResult, signalsResult] = await Promise.all([
+  const [cardsResult, signalsResult, reviewsResult] = await Promise.all([
     supabase
       .from("profile_cards")
       .select(
@@ -76,10 +77,17 @@ export default async function ComparePage({
         "user_id, category, total_attempts, attempts_30d, days_30d, avg_score_30d, avg_score_90d, best_score, strong_days_90d, last_attempt_at"
       )
       .in("user_id", ids),
+    supabase
+      .from("review_signals")
+      .select("user_id, reviewed_attempts, correct, partially_correct, incorrect")
+      .in("user_id", ids),
   ]);
 
   const cards = (cardsResult.data ?? []) as Array<Candidate>;
   const signals = signalsResult.data ?? [];
+  const reviewsByUser = new Map(
+    (reviewsResult.data ?? []).map((review) => [String(review.user_id), review as ReviewCounts])
+  );
 
   const candidates: Array<Candidate & { summary: ReturnType<typeof summariseCandidate> }> = cards
     .map((card) => ({
@@ -154,6 +162,9 @@ export default async function ComparePage({
                   Streak
                 </th>
                 <th scope="col" className="px-5 py-3 text-left font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                  Human-reviewed
+                </th>
+                <th scope="col" className="px-5 py-3 text-left font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
                   Last practice
                 </th>
               </tr>
@@ -193,6 +204,11 @@ export default async function ComparePage({
                     <td className="px-5 py-4 text-right tabular-nums text-foreground">
                       {candidate.current_streak}
                     </td>
+                    <td className="px-5 py-4 text-muted-foreground">
+                      {reviewSummary(reviewsByUser.get(candidate.id)).verified
+                        ? `${reviewSummary(reviewsByUser.get(candidate.id)).reviewed} reviewed`
+                        : "—"}
+                    </td>
                     <td className="px-5 py-4 text-muted-foreground">{candidate.summary.activity}</td>
                   </tr>
                 );
@@ -202,8 +218,9 @@ export default async function ComparePage({
         </div>
 
         <p className="mt-6 text-xs leading-relaxed text-muted">
-          Scores come from each challenge&apos;s rubric (structure, coverage, specificity). No record here
-          has been human-reviewed, so nothing is marked verified.
+          Scores come from each challenge&apos;s rubric (structure, coverage, specificity). The
+          human-reviewed column counts verdicts from reviewers who never see whose attempt it is — a dash
+          means no attempt has been reviewed, not that the record is unverified in principle.
         </p>
       </main>
     </div>

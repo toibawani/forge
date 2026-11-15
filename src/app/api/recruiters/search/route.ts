@@ -63,8 +63,16 @@ export const GET = apiRoute(
 
     const ids = (cards ?? []).map((card) => card.id);
     let signals: Array<Record<string, unknown>> = [];
+    let reviews: Array<Record<string, unknown>> = [];
 
     if (ids.length > 0) {
+      const { data: reviewRows } = await supabase
+        .from("review_signals")
+        .select("user_id, reviewed_attempts, correct, partially_correct, incorrect, last_reviewed_at")
+        .in("user_id", ids);
+      reviews = reviewRows ?? [];
+
+
       const { data: signalRows } = await supabase
         .from("skill_signals")
         .select(
@@ -80,12 +88,17 @@ export const GET = apiRoute(
       byUser.set(key, [...(byUser.get(key) ?? []), signal]);
     }
 
+    const reviewsByUser = new Map(reviews.map((review) => [String(review.user_id), review]));
+
     let results = (cards ?? []).map((card) => {
       const signalsForUser = byUser.get(card.id) ?? [];
       const days30 = signalsForUser.reduce((total, signal) => total + Number(signal.days_30d ?? 0), 0);
       return {
         ...card,
         signals: signalsForUser,
+        // Counts only: a recruiter can see that a human checked the work, and
+        // nothing more about the reviewer.
+        review: reviewsByUser.get(card.id) ?? null,
         // Recency and consistency carry more weight than a lifetime streak, so
         // an actively practising person outranks someone coasting on history.
         recentActivityDays: days30,

@@ -76,6 +76,26 @@ The rubric's structural floors meant a blank submission scored 19/100. A score
 that can be earned by writing nothing undermines every other number, so scoring
 short-circuits to zero. Covered by a test.
 
+## Reviews are blind, append-only, and never inside the attempt
+
+**Decision.** `attempt_reviews` is a separate table with one row per attempt, no
+update/delete policies, and writes only through `submit_attempt_review()`. The
+`review_queue()` function deliberately omits the author's id.
+
+**Why.** A score that can be edited is not evidence, so the verdict cannot live
+in `challenge_attempts`. Blind review stops a verdict becoming a judgement about
+a person, and omitting the reviewer id from the queue stops the queue being used
+to look up who wrote what.
+
+**Rejected.** Storing the verdict on the attempt (mutability), letting reviewers
+SELECT attempts directly (exposes author and full history), and showing the
+rubric score in the queue (anchoring: reviewers would agree with the number).
+
+**Tradeoff.** One verdict per attempt, so a disputed review cannot be
+overridden — it needs a second attempt or an explicit admin process later. The
+rubric score is recorded at review time, which makes agreement measurable
+(`src/lib/review.ts` → `calibration`).
+
 ## Tests run on the Node test runner, not a framework
 
 **Decision.** `npm test` runs `node --test` with `--experimental-strip-types`

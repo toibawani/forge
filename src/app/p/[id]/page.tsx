@@ -5,6 +5,7 @@ import { getServerUser } from "@/lib/supabase/server";
 import { buttonStyles, eyebrowStyles } from "@/components/ui/styles";
 import { skillLabel } from "@/lib/challenges";
 import { recencyLabel, summariseCandidate, type SkillSignal } from "@/lib/recruiter";
+import { reviewSummary } from "@/lib/review";
 
 export const metadata: Metadata = {
   title: "Practice record — Forge",
@@ -36,7 +37,7 @@ export default async function PublicRecordPage({ params }: { params: Promise<{ i
 
   const { supabase } = session;
 
-  const [cardResult, signalsResult] = await Promise.all([
+  const [cardResult, signalsResult, reviewsResult] = await Promise.all([
     supabase
       .from("profile_cards")
       .select(
@@ -50,6 +51,11 @@ export default async function PublicRecordPage({ params }: { params: Promise<{ i
         "category, total_attempts, attempts_30d, days_30d, avg_score_30d, avg_score_90d, best_score, strong_days_90d, last_attempt_at"
       )
       .eq("user_id", id),
+    supabase
+      .from("review_signals")
+      .select("reviewed_attempts, correct, partially_correct, incorrect, last_reviewed_at")
+      .eq("user_id", id)
+      .maybeSingle(),
   ]);
 
   const card = cardResult.data;
@@ -57,6 +63,7 @@ export default async function PublicRecordPage({ params }: { params: Promise<{ i
 
   const signals = (signalsResult.data ?? []) as SkillSignal[];
   const summary = summariseCandidate({ ...card, signals });
+  const reviews = reviewSummary(reviewsResult.data);
   const strongest = [...signals].sort(
     (a, b) => Number(b.avg_score_90d ?? 0) - Number(a.avg_score_90d ?? 0)
   );
@@ -78,9 +85,16 @@ export default async function PublicRecordPage({ params }: { params: Promise<{ i
       </header>
 
       <main className="mx-auto w-full max-w-4xl px-6 py-12">
-        <p className={eyebrowStyles}>
-          {card.visibility === "public" ? "Public record" : "Shared with verified recruiters"}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className={eyebrowStyles}>
+            {card.visibility === "public" ? "Public record" : "Shared with verified recruiters"}
+          </p>
+          {reviews.verified ? (
+            <span className="rounded border border-success/40 bg-success/[0.06] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-foreground">
+              human-reviewed · {reviews.reviewed}
+            </span>
+          ) : null}
+        </div>
 
         <h1 className="mt-2 text-[32px] font-semibold leading-tight tracking-tight text-foreground">
           {summary.name}
@@ -181,6 +195,43 @@ export default async function PublicRecordPage({ params }: { params: Promise<{ i
           )}
         </section>
 
+        {reviews.verified ? (
+          <section className="mt-6 rounded border border-card-border bg-card p-6">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-sm font-medium text-foreground">Human review</h2>
+              <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                {reviews.verified ? reviews.text : "none yet"}
+              </p>
+            </div>
+            <div className="mt-4 grid gap-px overflow-hidden rounded border border-card-border bg-card-border sm:grid-cols-4">
+              <div className="bg-card p-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Reviewed</p>
+                <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">{reviews.reviewed}</p>
+              </div>
+              <div className="bg-card p-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Correct</p>
+                <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">{reviews.correct}</p>
+              </div>
+              <div className="bg-card p-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Partly</p>
+                <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">
+                  {reviews.partiallyCorrect}
+                </p>
+              </div>
+              <div className="bg-card p-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Incorrect</p>
+                <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">
+                  {reviews.incorrect}
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 text-xs leading-relaxed text-muted">
+              Verdicts are recorded by a reviewer who never sees whose attempt it is. They are counted
+              exactly, not averaged into a score.
+            </p>
+          </section>
+        ) : null}
+
         <section className="mt-6 rounded border border-card-border bg-card p-6">
           <h2 className="text-sm font-medium text-foreground">How to read this</h2>
           <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted-foreground">
@@ -190,9 +241,13 @@ export default async function PublicRecordPage({ params }: { params: Promise<{ i
             </li>
             <li>
               Scores come from each challenge&apos;s rubric — coverage of the brief, structure, and
-              specificity. They do not verify technical correctness.
+              specificity. They measure how the answer is written, not whether it is right.
             </li>
-            <li>No record here has been human-reviewed, so nothing is labelled verified practice.</li>
+            <li>
+              {reviews.verified
+                ? "Correctness is covered only by the human review counts above. Unreviewed attempts carry no such claim."
+                : "No record here has been human-reviewed, so nothing is labelled verified practice."}
+            </li>
             <li>
               Self-declared skills above are the practitioner&apos;s own words; the evidence is the practice
               record, not the tag list.

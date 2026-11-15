@@ -1071,3 +1071,202 @@ $$;
 revoke all on public.rate_limits from anon, authenticated;
 revoke all on function public.consume_rate_limit(text, integer, integer) from public, anon, authenticated;
 grant execute on function public.consume_rate_limit(text, integer, integer) to service_role;
+
+-- ---------------------------------------------------------------------
+-- Human review
+-- A rubric can measure structure and specificity; it cannot tell whether an
+-- answer is correct. Reviews are therefore written by people, in their own
+-- append-only table: attempts stay immutable, and a review can never edit one.
+--
+-- Reviewer accounts are provisioned deliberately (admin SQL or a future
+-- invite flow). Signup metadata cannot create one: handle_new_user() maps any
+-- unknown role to practitioner.
+-- ---------------------------------------------------------------------
+
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role in ('practitioner', 'recruiter', 'reviewer', 'admin'));
+
+create or replace function public.is_reviewer()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (select p.role in ('reviewer', 'admin') from public.profiles p where p.id = auth.uid()),
+    false
+  );
+$$;
+
+revoke all on function public.is_reviewer() from public;
+grant execute on function public.is_reviewer() to authenticated, service_role;
+
+create table if not exists public.attempt_reviews (
+  id uuid primary key default gen_random_uuid(),
+  -- One verdict per attempt: a second opinion needs a second attempt.
+  attempt_id uuid not null unique references public.challenge_attempts (id) on delete cascade,
+  -- Nullable and set-null on delete: losing a reviewer account must not erase
+  -- the verdict it produced.
+  reviewer_id uuid references public.profiles (id) on delete set null,
+  verdict text not null check (verdict in ('correct', 'partially_correct', 'incorrect')),
+  note text not null check (char_length(note) between 10 and 1000),
+  -- The score at review time, kept for calibration against human judgement.
+  rubric_score integer check (rubric_score is null or (rubric_score >= 0 and rubric_score <= 100)),
+  rubric_version text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_attempt_reviews_reviewer
+  on public.attempt_reviews (reviewer_id, created_at desc);
+
+alter table public.attempt_reviews enable row level security;
+
+-- A practitioner can read the verdict on their own attempt; they never learn
+-- who wrote it, because feedback should not be personal.
+drop policy if exists "reviews_select_own_attempts" on public.attempt_reviews;
+create policy "reviews_select_own_attempts" on public.attempt_reviews
+  for select using (
+    exists (
+      select 1 from public.challenge_attempts a
+      where a.id = attempt_id and a.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "reviews_select_reviewers" on public.attempt_reviews;
+create policy "reviews_select_reviewers" on public.attempt_reviews
+  for select using (public.is_reviewer());
+
+-- Writes happen only through submit_attempt_review(), which enforces the role,
+-- refuses self-review, and stamps the rubric score itself.
+revoke insert, update, delete on public.attempt_reviews from authenticated, anon;
+grant select on public.attempt_reviews to authenticated;
+
+-- The queue is blind: a reviewer gets the answer and the rubric score, not the
+-- author, so the verdict cannot become a judgement about a person.
+create or replace function public.review_queue(p_limit integer default 10)
+returns table (
+  attempt_id uuid,
+  category text,
+  challenge_title text,
+  difficulty text,
+  answer text,
+  rubric_score integer,
+  submitted_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_reviewer() then
+    raise exception 'review_queue: reviewer role required';
+  end if;
+
+  return query
+    select
+      a.id,
+      c.category,
+      c.title,
+      c.difficulty,
+      coalesce(a.submission ->> 'answer', ''),
+      a.score,
+      a.created_at
+    from public.challenge_attempts a
+    join public.challenges c on c.id = a.challenge_id
+    left join public.attempt_reviews r on r.attempt_id = a.id
+    where r.id is null
+      and a.status = 'completed'
+      and a.score is not null
+      and char_length(coalesce(a.submission ->> 'answer', '')) > 0
+    order by a.created_at asc
+    limit greatest(1, least(coalesce(p_limit, 10), 25));
+end;
+$$;
+
+revoke all on function public.review_queue(integer) from public;
+grant execute on function public.review_queue(integer) to authenticated, service_role;
+
+create or replace function public.submit_attempt_review(
+  p_attempt uuid,
+  p_verdict text,
+  p_note text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_reviewer uuid := auth.uid();
+  v_owner uuid;
+  v_score integer;
+  v_version text;
+  v_id uuid;
+begin
+  if not public.is_reviewer() then
+    raise exception 'submit_attempt_review: reviewer role required';
+  end if;
+
+  if p_verdict not in ('correct', 'partially_correct', 'incorrect') then
+    raise exception 'submit_attempt_review: invalid verdict';
+  end if;
+
+  if p_note is null or char_length(btrim(p_note)) < 10 then
+    raise exception 'submit_attempt_review: note is too short';
+  end if;
+
+  select a.user_id, a.score, a.submission ->> 'rubric_version'
+    into v_owner, v_score, v_version
+  from public.challenge_attempts a
+  where a.id = p_attempt;
+
+  if v_owner is null then
+    raise exception 'submit_attempt_review: attempt not found';
+  end if;
+
+  if v_owner = v_reviewer then
+    raise exception 'submit_attempt_review: cannot review your own attempt';
+  end if;
+
+  if exists (select 1 from public.attempt_reviews where attempt_id = p_attempt) then
+    raise exception 'submit_attempt_review: already reviewed';
+  end if;
+
+  insert into public.attempt_reviews (attempt_id, reviewer_id, verdict, note, rubric_score, rubric_version)
+  values (p_attempt, v_reviewer, p_verdict, btrim(p_note), v_score, v_version)
+  returning id into v_id;
+
+  return v_id;
+end;
+$$;
+
+revoke all on function public.submit_attempt_review(uuid, text, text) from public;
+grant execute on function public.submit_attempt_review(uuid, text, text) to authenticated, service_role;
+
+-- Recruiter-facing aggregate. Only counts and the most recent review date:
+-- enough to say "a human checked this", not enough to profile anyone.
+create or replace view public.review_signals
+with (security_invoker = false)
+as
+select
+  a.user_id,
+  count(*)::int as reviewed_attempts,
+  count(*) filter (where r.verdict = 'correct')::int as correct,
+  count(*) filter (where r.verdict = 'partially_correct')::int as partially_correct,
+  count(*) filter (where r.verdict = 'incorrect')::int as incorrect,
+  max(r.created_at) as last_reviewed_at
+from public.attempt_reviews r
+join public.challenge_attempts a on a.id = r.attempt_id
+join public.profiles p on p.id = a.user_id
+where p.deleted_at is null
+  and (
+    p.visibility = 'public'
+    or (p.visibility = 'recruiters_only' and public.is_recruiter())
+    or a.user_id = auth.uid()
+  )
+group by a.user_id;
+
+revoke all on public.review_signals from anon;
+grant select on public.review_signals to authenticated;

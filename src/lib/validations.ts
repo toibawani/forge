@@ -70,6 +70,20 @@ export const newPasswordSchema = z
   });
 
 // ---------------------------------------------------------------------
+// Human review
+// ---------------------------------------------------------------------
+
+export const reviewSchema = z.object({
+  attemptId: z.string().uuid("Invalid attempt ID"),
+  verdict: z.enum(["correct", "partially_correct", "incorrect"]),
+  note: z
+    .string()
+    .trim()
+    .min(10, "Explain the verdict in at least 10 characters")
+    .max(1000, "Keep the note under 1000 characters"),
+});
+
+// ---------------------------------------------------------------------
 // Practice
 // ---------------------------------------------------------------------
 

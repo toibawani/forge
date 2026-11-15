@@ -20,7 +20,7 @@ import { logger } from "@/lib/logger";
 
 export type SessionProfile = {
   id: string;
-  role: "practitioner" | "recruiter" | "admin";
+  role: "practitioner" | "recruiter" | "reviewer" | "admin";
   visibility: "private" | "recruiters_only" | "public";
   consent_at: string | null;
   consent_policy_version: string | null;

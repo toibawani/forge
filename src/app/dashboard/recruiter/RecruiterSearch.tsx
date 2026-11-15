@@ -5,8 +5,9 @@ import Link from "next/link";
 import { buttonStyles } from "@/components/ui/styles";
 import { skillLabel } from "@/lib/challenges";
 import { summariseCandidate, type Candidate, type CandidateSummary } from "@/lib/recruiter";
+import { reviewSummary, type ReviewCounts } from "@/lib/review";
 
-type Row = Candidate & { summary: CandidateSummary };
+type Row = Candidate & { summary: CandidateSummary; review?: ReviewCounts | null };
 
 const CATEGORIES = ["engineering", "design", "analysis", "writing"] as const;
 
@@ -211,6 +212,12 @@ export function RecruiterSearch() {
                     {row.summary.activity} · {row.summary.consistency.label} · {row.current_streak} day streak
                     {row.summary.strongestScore !== null ? ` · avg ${row.summary.strongestScore}` : ""}
                   </p>
+
+                  {reviewSummary(row.review).verified ? (
+                    <p className="mt-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-foreground">
+                      human-reviewed · {reviewSummary(row.review).text}
+                    </p>
+                  ) : null}
 
                   {row.headline ? (
                     <p className="mt-2 text-sm leading-relaxed text-foreground/90">{row.headline}</p>

@@ -19,16 +19,23 @@ declare
   alice uuid := '00000000-0000-4000-8000-000000000001';
   bob uuid := '00000000-0000-4000-8000-000000000002';
   rec uuid := '00000000-0000-4000-8000-000000000003';
+  rev uuid := '00000000-0000-4000-8000-000000000004';
   attempt uuid;
   bob_session uuid;
+  rev_attempt uuid;
   n integer;
 begin
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_user_meta_data, created_at, updated_at)
   values
     (alice, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'alice@example.test', crypt('password123', gen_salt('bf')), now(), '{"role":"practitioner","policy_version":"test"}'::jsonb, now(), now()),
     (bob,   '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'bob@example.test',   crypt('password123', gen_salt('bf')), now(), '{"role":"practitioner","policy_version":"test"}'::jsonb, now(), now()),
-    (rec,   '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'rec@example.test',   crypt('password123', gen_salt('bf')), now(), '{"role":"recruiter","policy_version":"test"}'::jsonb, now(), now())
+    (rec,   '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'rec@example.test',   crypt('password123', gen_salt('bf')), now(), '{"role":"recruiter","policy_version":"test"}'::jsonb, now(), now()),
+    (rev,   '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'rev@example.test',   crypt('password123', gen_salt('bf')), now(), '{"role":"reviewer","policy_version":"test"}'::jsonb, now(), now())
   on conflict (id) do nothing;
+
+  -- Reviewer accounts are provisioned, not self-selected: the signup trigger
+  -- only accepts practitioner or recruiter, so promote explicitly as postgres.
+  update public.profiles set role = 'reviewer' where id = rev;
 
   -- Alice makes her profile recruiter-discoverable and logs one attempt.
   update public.profiles set visibility = 'recruiters_only', skills = array['typescript'] where id = alice;
@@ -194,6 +201,78 @@ begin
   exception
     when insufficient_privilege or undefined_function then null;
   end;
+
+  -- 15. A practitioner cannot write a review directly, nor see the queue.
+  begin
+    insert into public.attempt_reviews (attempt_id, reviewer_id, verdict, note)
+    values (attempt, alice, 'correct', 'self-awarded verdict from the client');
+    raise exception 'PRIVILEGE: alice inserted an attempt review directly';
+  exception
+    when insufficient_privilege or check_violation then null;
+  end;
+
+  begin
+    perform public.review_queue(5);
+    raise exception 'PRIVILEGE: practitioner can read the review queue';
+  exception
+    when insufficient_privilege or raise_exception then
+      if sqlerrm like 'PRIVILEGE:%' then raise; end if;
+  end;
+
+  select count(*) into n from public.attempt_reviews;
+  if n <> 0 then
+    raise exception 'IDOR: alice can read reviews of attempts she does not own';
+  end if;
+
+  -- 16. A reviewer can read a blind queue, and it does not expose the author.
+  execute 'reset role';
+  perform set_config('request.jwt.claims', json_build_object('sub', rev, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+
+  select count(*) into n from public.review_queue(5);
+  if n < 1 then
+    raise exception 'REVIEW: queue returned no rows for a reviewer';
+  end if;
+
+  -- 17. A reviewer cannot review their own attempt.
+  insert into public.challenge_attempts (user_id, challenge_id, submission, score, time_spent_seconds)
+  select rev, c.id, '{"answer":"my own answer"}'::jsonb, 70, 300
+  from public.challenges c limit 1
+  returning id into rev_attempt;
+
+  begin
+    perform public.submit_attempt_review(rev_attempt, 'correct', 'reviewing my own work');
+    raise exception 'REVIEW: reviewer reviewed their own attempt';
+  exception
+    when raise_exception then
+      if sqlerrm like 'REVIEW:%' then raise; end if;
+  end;
+
+  -- 18. A reviewer can record a verdict on someone else's attempt, exactly once.
+  perform public.submit_attempt_review(attempt, 'correct', 'The fix matches the measured cause.');
+
+  begin
+    perform public.submit_attempt_review(attempt, 'incorrect', 'Second opinion on the same attempt.');
+    raise exception 'REVIEW: second verdict accepted for one attempt';
+  exception
+    when raise_exception or unique_violation then
+      if sqlerrm like 'REVIEW:%' then raise; end if;
+  end;
+
+  -- 19. The author sees the verdict but not who wrote it.
+  execute 'reset role';
+  perform set_config('request.jwt.claims', json_build_object('sub', alice, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+
+  select count(*) into n from public.attempt_reviews;
+  if n <> 1 then
+    raise exception 'REVIEW: author cannot read the verdict on their own attempt (% rows)', n;
+  end if;
+
+  select count(*) into n from public.review_signals;
+  if n <> 1 then
+    raise exception 'REVIEW: author cannot see their own review summary (% rows)', n;
+  end if;
 end;
 $$;
 

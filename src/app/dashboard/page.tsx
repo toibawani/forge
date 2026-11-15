@@ -182,6 +182,11 @@ export default async function DashboardPage() {
                 Hiring
               </Link>
             ) : null}
+            {profile?.role === "reviewer" || profile?.role === "admin" ? (
+              <Link href="/dashboard/review" className="text-muted-foreground hover:text-foreground">
+                Review
+              </Link>
+            ) : null}
           </nav>
         </div>
       </header>

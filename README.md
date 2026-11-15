@@ -171,6 +171,7 @@ It processes due deletions, records accountability rows, runs retention cleanup,
 /dashboard               streak, consistency, 14-day activity, recent sessions
 /dashboard/recruiter     candidate search over opted-in records (recruiter/admin)
 /dashboard/recruiter/compare   side-by-side comparison of selected records
+/dashboard/review        blind review queue: verdict on correctness (reviewer/admin)
 /p/[id]                  shareable practice record: signals, recency, no contact details
 /practice                skill picker, recommendation, catalogue
 /practice/[slug]         focused runner: brief, timer, answer, submit
@@ -195,7 +196,9 @@ POST   /api/account/delete         schedule or immediately erase
 POST   /api/account/delete/cancel  cancel within grace period
 GET    /api/account/requests       data principal requests
 POST   /api/account/requests       raise access / correction / grievance / nomination
-GET    /api/recruiters/search      opted-in practitioners + skill signals (recruiter only)
+GET    /api/recruiters/search      opted-in practitioners + skill signals + review counts (recruiter only)
+GET    /api/reviews/queue          unreviewed attempts, blind to the author (reviewer/admin)
+POST   /api/reviews                record a verdict; refuses self-review and second verdicts
 GET    /api/pipelines              own pipelines (recruiter only)
 POST   /api/pipelines              create pipeline
 POST   /api/pipelines/:id/candidates   add candidate (must be discoverable)
@@ -229,6 +232,7 @@ src/
 │   ├── progression.ts                   earned levels, trends, milestones
 │   ├── challenges.ts                    catalogue helpers + reasoned recommendation
 │   ├── recruiter.ts                     recency / consistency presentation helpers
+│   ├── review.ts                        verdict labels, review summaries, calibration
 │   └── *.test.ts                       node:test suites for the pure modules
 │   ├── supabase/{server,client,admin}.ts
 │   ├── validations.ts                  Zod schemas
@@ -253,8 +257,10 @@ docs/decisions.md                       why limits live in Postgres, levels are 
 - **Scoring is rule-based, not semantic.** Rubric v1 measures completeness, structure and
   specificity. It cannot judge whether an argument is *correct*, so a confident wrong answer can
   score well. Peer or expert review is the next layer, not a model pretending to grade.
-- **No human review yet.** A score is rubric-scored and labelled as such everywhere a recruiter can
-  see it. Nothing carries a "verified practice" badge, because no review exists to justify one.
+- **Human review exists but has no reviewers yet.** The queue, verdicts and recruiter-facing counts
+  are implemented; reviewer accounts must be provisioned (`update profiles set role = 'reviewer'`),
+  and no calibration data has been collected, so the rubric-vs-human agreement number is unmeasured.
+  Until reviews land, records show no verified badge — that is the intended behaviour, not a gap.
 - **Pipelines have an API but no full UI.** Pipelines and their candidate counts are listed; creating
   a pipeline, moving stages and adding candidates is API-only today.
 - **No email delivery.** Confirmation and recovery links are sent by Supabase; weekly summaries and
