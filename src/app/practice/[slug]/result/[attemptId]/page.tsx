@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getServerUser } from "@/lib/supabase/server";
 import { buttonStyles, eyebrowStyles } from "@/components/ui/styles";
 import { minutesLabel, parseRubric, recommendNext, scoreBand, skillLabel } from "@/lib/challenges";
+import { benchmarkFor } from "@/lib/benchmark";
 import { buildFeedback, type AttemptFeedback, type FeedbackDimension } from "@/lib/feedback";
 import {
   nextMilestone,
@@ -129,6 +130,12 @@ export default async function AttemptResultPage({
       .eq("is_active", true),
   ]);
 
+  const { data: statsRow } = await supabase
+    .from("challenge_stats")
+    .select("challenge_id, attempts, median_score")
+    .eq("challenge_id", attempt.challenge_id as string)
+    .maybeSingle();
+
   const submission = (attempt.submission ?? {}) as {
     answer?: string;
     scoring?: StoredScoring;
@@ -154,6 +161,7 @@ export default async function AttemptResultPage({
       : null);
 
   const score = attempt.score as number | null;
+  const benchmark = benchmarkFor(score, statsRow);
   const band = scoreBand(score);
 
   const allRows = (attemptsResult.data ?? []) as AttemptRowWithCategory[];
@@ -278,6 +286,11 @@ export default async function AttemptResultPage({
               <p className="mt-3 max-w-md text-sm leading-relaxed text-foreground">
                 {feedback?.headline ?? band.summary}
               </p>
+              {benchmark.available ? (
+                <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                  {benchmark.text}
+                </p>
+              ) : null}
             </div>
 
             <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-right sm:grid-cols-1">
@@ -484,6 +497,12 @@ export default async function AttemptResultPage({
               </Link>
               <Link href="/practice" className={buttonStyles("secondary", "md")}>
                 Choose something else
+              </Link>
+              <Link
+                href={`/practice/${challengeRow?.slug ?? slug}`}
+                className={buttonStyles("ghost", "md")}
+              >
+                Practise this one again
               </Link>
             </div>
           </section>

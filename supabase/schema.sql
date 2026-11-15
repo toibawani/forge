@@ -1270,3 +1270,30 @@ group by a.user_id;
 
 revoke all on public.review_signals from anon;
 grant select on public.review_signals to authenticated;
+
+-- ---------------------------------------------------------------------
+-- Challenge benchmarks
+-- How a challenge actually scores, from the attempts already recorded. Shown
+-- only above a minimum sample so a number from three attempts cannot pose as
+-- difficulty. No user identifiers are exposed, only aggregates.
+-- ---------------------------------------------------------------------
+
+create or replace view public.challenge_stats
+with (security_invoker = false)
+as
+select
+  a.challenge_id,
+  count(*)::int as attempts,
+  count(distinct a.user_id)::int as practitioners,
+  round(avg(a.score))::int as mean_score,
+  percentile_cont(0.5) within group (order by a.score)::int as median_score,
+  percentile_cont(0.25) within group (order by a.score)::int as p25,
+  percentile_cont(0.75) within group (order by a.score)::int as p75,
+  round(avg(a.time_spent_seconds))::int as mean_seconds
+from public.challenge_attempts a
+where a.status = 'completed'
+  and a.score is not null
+group by a.challenge_id;
+
+revoke all on public.challenge_stats from anon;
+grant select on public.challenge_stats to authenticated;

@@ -37,6 +37,11 @@ guess. The product says that plainly rather than overselling it.
 - **Recommendations state their reason.** The next challenge is chosen by rotation (two sessions in
   one skill is a rut), weakest area, then the difficulty your level actually earned. The reason is
   shown, so the recommendation can be argued with.
+- **Difficulty is measured, not declared.** `challenge_stats` reports how a challenge actually
+  scores (median, quartiles, mean time) from the attempts already recorded. It is shown only once five
+  attempts exist, because a median from three attempts is a coincidence — and in a small cohort it can
+  identify people. An attempt's result page compares your score to that median, as a distance rather
+  than a grade.
 - **Recruiter signals favour the present.** `skill_signals` exposes recency and consistency
   (`days_30d`, `strong_days_90d`, `avg_score_90d`, `last_attempt_at`), and search ranks by recent
   activity rather than a lifetime streak.
@@ -184,6 +189,7 @@ It processes due deletions, records accountability rows, runs retention cleanup,
 POST   /api/auth/signup | login | logout | forgot-password | reset-password
 GET    /api/auth/…       (session cookie based, httpOnly)
 GET    /api/challenges   public catalogue
+GET    /api/health       unauthenticated health: config, database, schema presence (booleans only)
 POST   /api/challenges   record an attempt (rubric v1, server-scored, server-timed, idempotent)
 POST   /api/practice/sessions   open a timed session before the prompt renders
 GET    /api/profile      own profile

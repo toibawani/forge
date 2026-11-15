@@ -12,6 +12,7 @@ import {
   type Challenge,
 } from "@/lib/challenges";
 import { levelsByCategory, progressFor, type ScoredAttempt } from "@/lib/progression";
+import { benchmarkFor, type ChallengeStats } from "@/lib/benchmark";
 
 export const metadata: Metadata = {
   title: "Practice — Forge",
@@ -26,7 +27,7 @@ export default async function PracticePage() {
 
   const { supabase, user } = session;
 
-  const [challengesResult, attemptsResult, profileResult] = await Promise.all([
+  const [challengesResult, attemptsResult, profileResult, statsResult] = await Promise.all([
     supabase
       .from("challenges")
       .select(
@@ -40,7 +41,12 @@ export default async function PracticePage() {
       .order("created_at", { ascending: false })
       .limit(200),
     supabase.from("profiles").select("consent_at, display_name").eq("id", user.id).maybeSingle(),
+    supabase.from("challenge_stats").select("challenge_id, attempts, median_score"),
   ]);
+
+  const statsByChallenge = new Map(
+    (statsResult.data ?? []).map((row) => [row.challenge_id as string, row as ChallengeStats])
+  );
 
   const challenges: Challenge[] = (challengesResult.data ?? [])
     .map((row) => ({
@@ -173,6 +179,12 @@ export default async function PracticePage() {
                     {recommendation.reason}
                   </p>
 
+                  {benchmarkFor(null, statsByChallenge.get(recommendation.challenge.id)).available ? (
+                    <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                      {benchmarkFor(null, statsByChallenge.get(recommendation.challenge.id)).text}
+                    </p>
+                  ) : null}
+
                   {recommendation.challenge.rubric.signals &&
                   recommendation.challenge.rubric.signals.length > 0 ? (
                     <ul className="mt-4 flex flex-wrap gap-2" aria-label="What the rubric looks for">
@@ -272,6 +284,13 @@ export default async function PracticePage() {
                             {skillLabel(challenge.category)} · {challenge.difficulty} ·{" "}
                             {challenge.estimated_minutes} min
                             {practised > 0 ? ` · attempted ${practised}×` : ""}
+                            {(() => {
+                              const stats = statsByChallenge.get(challenge.id);
+                              const benchmark = benchmarkFor(null, stats);
+                              return benchmark.available
+                                ? ` · median ${benchmark.median} across ${benchmark.attempts}`
+                                : "";
+                            })()}
                           </p>
                         </div>
                         <span className="shrink-0 font-mono text-[11px] text-muted">→</span>
