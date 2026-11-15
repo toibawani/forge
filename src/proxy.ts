@@ -4,16 +4,17 @@ import { NextResponse, type NextRequest } from "next/server";
 /**
  * Session refresh + route protection.
  *
- * Middleware is a redirect convenience, not an authorization boundary: every
- * API route and server page verifies the session again on its own. It refreshes
- * the Supabase auth cookies on each navigation so a user is not silently
- * logged out when the access token expires.
+ * Next.js 16 renamed the middleware convention to proxy. This is a redirect
+ * convenience, not an authorization boundary: every API route and server page
+ * verifies the session again on its own. It refreshes the Supabase auth cookies
+ * on each navigation so a user is not silently logged out when the access token
+ * expires.
  */
 
 const PROTECTED_PREFIXES = ["/dashboard", "/settings", "/profile", "/practice"];
 const AUTH_PAGES = ["/login", "/signup"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
