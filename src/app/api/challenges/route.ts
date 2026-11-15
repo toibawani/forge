@@ -1,6 +1,7 @@
 import { apiRoute, created, fail, ok, readJson } from "@/lib/api";
 import { challengeAttemptSchema } from "@/lib/validations";
 import { scoreSubmission, type Rubric } from "@/lib/scoring";
+import { buildFeedback } from "@/lib/feedback";
 import { hashIp, requestIp } from "@/lib/request-meta";
 import { rateLimit } from "@/lib/rate-limit";
 import { logAuditEvent } from "@/lib/audit-logger";
@@ -107,11 +108,17 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
     return fail(404, "challenge_not_found", "That challenge is not available.");
   }
 
-  const breakdown = scoreSubmission(
-    input.answer,
-    (challenge.rubric as Rubric | null) ?? null,
-    challenge.category
-  );
+  const rubric = (challenge.rubric as Rubric | null) ?? null;
+  const breakdown = scoreSubmission(input.answer, rubric, challenge.category);
+
+  // Feedback is written with the attempt, so an exported record explains itself
+  // later without depending on the rubric implementation of the day.
+  const feedback = buildFeedback({
+    answer: input.answer,
+    signals: breakdown.signals,
+    minWords: rubric?.min_words ?? 25,
+    category: challenge.category,
+  });
 
   const { data: attempt, error: insertError } = await supabase
     .from("challenge_attempts")
@@ -121,6 +128,7 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
       submission: {
         answer: input.answer,
         scoring: breakdown,
+        feedback,
       },
       score: breakdown.score,
       time_spent_seconds: elapsedSeconds,
@@ -142,7 +150,7 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
         .maybeSingle();
 
       if (existing) {
-        return ok({ attempt: existing, scoring: breakdown, idempotent: true });
+        return ok({ attempt: existing, scoring: breakdown, feedback, idempotent: true });
       }
     }
 
@@ -172,5 +180,5 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
     actorRole: profile.role,
   });
 
-  return created({ attempt, scoring: breakdown, streak: streak ?? null });
+  return created({ attempt, scoring: breakdown, feedback, streak: streak ?? null });
 });

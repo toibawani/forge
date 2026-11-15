@@ -3,6 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerUser } from "@/lib/supabase/server";
 import { buttonStyles, eyebrowStyles } from "@/components/ui/styles";
+import { levelsByCategory, type ScoredAttempt } from "@/lib/progression";
+import { skillLabel } from "@/lib/challenges";
 
 export const metadata: Metadata = {
   title: "Skill record — Forge",
@@ -71,6 +73,17 @@ export default async function ProfilePage() {
     ? Math.round(scored.reduce((total, attempt) => total + (attempt.score ?? 0), 0) / scored.length)
     : null;
 
+  const scoredAttempts: ScoredAttempt[] = attempts.map((attempt) => {
+    const challenge = Array.isArray(attempt.challenges) ? attempt.challenges[0] : attempt.challenges;
+    return {
+      score: attempt.score,
+      practice_date: attempt.practice_date,
+      created_at: attempt.practice_date,
+      category: challenge?.category ?? null,
+    };
+  });
+  const levels = levelsByCategory(scoredAttempts);
+
   return (
     <div className="min-h-screen">
       <header className="border-b border-card-border">
@@ -120,6 +133,30 @@ export default async function ProfilePage() {
             <p className="mt-1 text-xl font-semibold tabular-nums">{attempts.length}</p>
           </div>
         </div>
+
+        {levels.size > 0 ? (
+          <section className="mt-8" aria-label="Skill levels">
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+              Levels, earned from days practised and recent quality
+            </p>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              {Array.from(levels.entries()).map(([category, level]) => (
+                <div key={category} className="rounded border border-card-border bg-card p-4">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-sm text-foreground">{skillLabel(category)}</p>
+                    <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                      {level.level.name}
+                    </p>
+                  </div>
+                  <div className="mt-3 h-1 overflow-hidden rounded-full bg-foreground/10">
+                    <div className="h-full rounded-full bg-primary" style={{ width: `${level.percent}%` }} />
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-muted">{level.requirement}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {profile?.skills && profile.skills.length > 0 ? (
           <ul className="mt-6 flex flex-wrap gap-2" aria-label="Declared skills">

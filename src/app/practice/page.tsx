@@ -7,11 +7,11 @@ import {
   DIFFICULTY_ORDER,
   parseContent,
   parseRubric,
-  primaryCategory,
-  recommendChallenge,
+  recommendNext,
   skillLabel,
   type Challenge,
 } from "@/lib/challenges";
+import { levelsByCategory, progressFor, type ScoredAttempt } from "@/lib/progression";
 
 export const metadata: Metadata = {
   title: "Practice — Forge",
@@ -35,7 +35,7 @@ export default async function PracticePage() {
       .eq("is_active", true),
     supabase
       .from("challenge_attempts")
-      .select("challenge_id, practice_date, created_at, challenges(category)")
+      .select("challenge_id, score, practice_date, created_at, challenges(category)")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(200),
@@ -68,25 +68,31 @@ export default async function PracticePage() {
       practice_date: row.practice_date as string,
       created_at: row.created_at as string,
       category: relation?.category ?? null,
+      score: (row.score as number | null) ?? null,
     };
   });
 
-  const consentMissing = !profileResult.data?.consent_at;
-  const preferred = primaryCategory(attempts, challenges);
-  const recommended = recommendChallenge(challenges, attempts, preferred);
+  const scoredAttempts: ScoredAttempt[] = attempts.map((attempt) => ({
+    score: attempt.score,
+    practice_date: attempt.practice_date,
+    created_at: attempt.created_at,
+    category: attempt.category,
+  }));
 
-  const categories = Array.from(new Set(challenges.map((challenge) => challenge.category))).map(
-    (category) => {
+  const consentMissing = !profileResult.data?.consent_at;
+  const recommendation = recommendNext({ challenges, attempts });
+  const levels = levelsByCategory(scoredAttempts);
+
+  const categories = Array.from(new Set(challenges.map((challenge) => challenge.category)))
+    .map((category) => {
       const inCategory = challenges.filter((challenge) => challenge.category === category);
-      const practised = attempts.filter((attempt) => attempt.category === category).length;
-      return {
-        category,
-        total: inCategory.length,
-        practised,
-        next: recommendChallenge(inCategory, attempts),
-      };
-    }
-  );
+      const practiced = attempts.filter((attempt) => attempt.category === category).length;
+      const level = levels.get(category) ?? progressFor([]);
+      const next = recommendNext({ challenges: inCategory, attempts });
+
+      return { category, total: inCategory.length, practiced, level, next };
+    })
+    .sort((a, b) => b.practiced - a.practiced);
 
   return (
     <div className="min-h-screen">
@@ -118,8 +124,8 @@ export default async function PracticePage() {
           Choose today&apos;s work.
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-          One challenge, five to fifteen minutes. The timer starts when the prompt opens and the score is
-          computed on the server. Nothing here is editable afterwards.
+          One challenge, five to fifteen minutes. The clock is server-measured and the score is computed from
+          the rubric. Nothing here is editable afterwards.
         </p>
 
         {consentMissing ? (
@@ -142,28 +148,35 @@ export default async function PracticePage() {
           </div>
         ) : (
           <>
-            {recommended ? (
+            {recommendation ? (
               <section className="mt-10 rounded border border-card-border bg-card">
                 <div className="flex flex-col gap-1 border-b border-card-border px-6 py-4 sm:flex-row sm:items-baseline sm:justify-between">
                   <h2 className="text-sm font-medium text-foreground">
-                    {attempts.length === 0 ? "Start here" : `Continue with ${skillLabel(recommended.category)}`}
+                    {attempts.length === 0 ? "Start here" : "Recommended next"}
                   </h2>
                   <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
-                    {recommended.estimated_minutes} min · {recommended.difficulty}
+                    {skillLabel(recommendation.challenge.category)} · {recommendation.challenge.difficulty} ·{" "}
+                    {recommendation.challenge.estimated_minutes} min
                   </p>
                 </div>
 
                 <div className="px-6 py-6">
                   <h3 className="text-xl font-semibold tracking-tight text-foreground">
-                    {recommended.title}
+                    {recommendation.challenge.title}
                   </h3>
                   <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                    {recommended.description}
+                    {recommendation.challenge.description}
                   </p>
 
-                  {recommended.rubric.signals && recommended.rubric.signals.length > 0 ? (
+                  {/* The reason is shown, so the recommendation can be judged. */}
+                  <p className="mt-4 border-l-2 border-accent/50 pl-3 text-sm leading-relaxed text-foreground">
+                    {recommendation.reason}
+                  </p>
+
+                  {recommendation.challenge.rubric.signals &&
+                  recommendation.challenge.rubric.signals.length > 0 ? (
                     <ul className="mt-4 flex flex-wrap gap-2" aria-label="What the rubric looks for">
-                      {recommended.rubric.signals.map((signal) => (
+                      {recommendation.challenge.rubric.signals.map((signal) => (
                         <li
                           key={signal}
                           className="rounded border border-card-border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-muted"
@@ -176,13 +189,15 @@ export default async function PracticePage() {
 
                   <div className="mt-6 flex flex-wrap items-center gap-3">
                     <Link
-                      href={`/practice/${recommended.slug}`}
+                      href={`/practice/${recommendation.challenge.slug}`}
                       className={buttonStyles("primary", "md")}
                     >
                       Start session
                     </Link>
                     <span className="text-xs text-muted">
-                      {preferred ? `Your most practised skill: ${skillLabel(preferred)}` : "New record"}
+                      {attempts.length === 0
+                        ? "First session sets your baseline."
+                        : `${attempts.length} attempts on record`}
                     </span>
                   </div>
                 </div>
@@ -198,17 +213,32 @@ export default async function PracticePage() {
                     className="flex flex-col justify-between rounded border border-card-border bg-card p-5"
                   >
                     <div>
-                      <p className="text-sm font-medium text-foreground">{skillLabel(entry.category)}</p>
-                      <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
-                        {entry.practised} logged · {entry.total} available
+                      <div className="flex items-baseline justify-between gap-3">
+                        <p className="text-sm font-medium text-foreground">{skillLabel(entry.category)}</p>
+                        <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                          {entry.level.level.name}
+                        </p>
+                      </div>
+
+                      <div className="mt-3 h-1 overflow-hidden rounded-full bg-foreground/10">
+                        <div
+                          className="h-full rounded-full bg-primary"
+                          style={{ width: `${entry.level.percent}%` }}
+                        />
+                      </div>
+
+                      <p className="mt-2 text-xs leading-relaxed text-muted">{entry.level.requirement}</p>
+                      <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                        {entry.practiced} logged · avg {entry.level.average ?? "—"} · {entry.total} available
                       </p>
                     </div>
+
                     {entry.next ? (
                       <Link
-                        href={`/practice/${entry.next.slug}`}
+                        href={`/practice/${entry.next.challenge.slug}`}
                         className={buttonStyles("secondary", "sm", "mt-4 self-start")}
                       >
-                        {entry.practised > 0 ? "Continue" : "Begin"}
+                        {entry.practiced > 0 ? "Continue" : "Begin"}
                       </Link>
                     ) : null}
                   </div>
