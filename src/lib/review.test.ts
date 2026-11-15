@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  CALIBRATION_MIN_SAMPLE,
   calibration,
+  calibrationNote,
   reviewSummary,
   rubricBand,
   verdictLabel,
@@ -79,6 +81,22 @@ test("calibration separates overrating from underrating", () => {
   assert.equal(result.agreement, 50);
   assert.equal(result.overrated, 1);
   assert.equal(result.underrated, 1);
+});
+
+test("a tiny sample is never presented as proof", () => {
+  const none = calibrationNote(0);
+  assert.equal(none.confident, false);
+  assert.match(none.text, /unmeasured/i);
+
+  const tiny = calibrationNote(3);
+  assert.equal(tiny.confident, false);
+  assert.match(tiny.text, /indicative, not proven/i);
+
+  const singular = calibrationNote(1);
+  assert.match(singular.text, /1 reviewed attempt\b/);
+
+  const enough = calibrationNote(CALIBRATION_MIN_SAMPLE);
+  assert.equal(enough.confident, true);
 });
 
 test("full agreement is 100, not rounded oddly", () => {

@@ -122,6 +122,30 @@ export type Calibration = {
   underrated: number;
 };
 
+/** Below this, agreement is treated as indicative rather than proven. */
+export const CALIBRATION_MIN_SAMPLE = 20;
+
+/**
+ * How much weight the agreement number deserves.
+ *
+ * The failure mode here is quoting "100% agreement" off three reviews, so the
+ * sample size is stated with the number rather than buried in a footnote.
+ */
+export function calibrationNote(total: number): { text: string; confident: boolean } {
+  if (total === 0) {
+    return { text: "No reviewed attempts yet, so agreement is unmeasured.", confident: false };
+  }
+
+  if (total < CALIBRATION_MIN_SAMPLE) {
+    return {
+      text: `Only ${total} reviewed attempt${total === 1 ? "" : "s"} — indicative, not proven.`,
+      confident: false,
+    };
+  }
+
+  return { text: `${total} reviewed attempts.`, confident: true };
+}
+
 /**
  * Agreement between the rubric band and the human verdict.
  *
@@ -130,6 +154,8 @@ export type Calibration = {
  * change the rubric, not to hide the number.
  */
 export function calibration(pairs: CalibrationPair[]): Calibration {
+  // Only scored attempts can be compared: an unscored answer has no band.
+
   if (pairs.length === 0) {
     return { total: 0, agreement: null, overrated: 0, underrated: 0 };
   }

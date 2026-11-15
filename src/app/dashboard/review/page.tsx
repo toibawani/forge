@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerUser } from "@/lib/supabase/server";
 import { eyebrowStyles } from "@/components/ui/styles";
+import { calibration, calibrationNote, type CalibrationPair, type Verdict } from "@/lib/review";
 import { ReviewCard } from "./ReviewCard";
 
 export const metadata: Metadata = {
@@ -39,8 +40,24 @@ export default async function ReviewQueuePage() {
     redirect("/dashboard");
   }
 
-  const { data, error } = await supabase.rpc("review_queue", { p_limit: 10 });
+  const [{ data, error }, { data: reviewedRows }] = await Promise.all([
+    supabase.rpc("review_queue", { p_limit: 10 }),
+    // Reviewers can read every verdict; practitioners can only read their own,
+    // which is why this panel is behind the reviewer role.
+    supabase
+      .from("attempt_reviews")
+      .select("verdict, rubric_score")
+      .not("rubric_score", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(500),
+  ]);
+
   const items = (data ?? []) as QueueItem[];
+  const pairs: CalibrationPair[] = (reviewedRows ?? [])
+    .filter((row) => typeof row.rubric_score === "number")
+    .map((row) => ({ rubricScore: row.rubric_score as number, verdict: row.verdict as Verdict }));
+  const agreement = calibration(pairs);
+  const note = calibrationNote(agreement.total);
 
   return (
     <div className="min-h-screen">
@@ -99,10 +116,46 @@ export default async function ReviewQueuePage() {
           </ul>
         )}
 
-        <p className="mt-10 border-t border-card-border pt-6 text-xs leading-relaxed text-muted">
+        <section className="mt-10 rounded border border-card-border bg-card p-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium text-foreground">How often does the rubric agree?</h2>
+            <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+              {agreement.agreement === null ? "no data" : `${agreement.agreement}%`}
+            </p>
+          </div>
+
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Human verdicts compared with the band the rubric implies (75+ correct, 50–74 partly correct,
+            below 50 incorrect).
+          </p>
+
+          <div className="mt-4 grid gap-px overflow-hidden rounded border border-card-border bg-card-border sm:grid-cols-3">
+            <div className="bg-card p-4">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Reviewed</p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">{agreement.total}</p>
+            </div>
+            <div className="bg-card p-4">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Rubric overrated</p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">{agreement.overrated}</p>
+              <p className="mt-0.5 text-xs text-muted">worse than the score suggested</p>
+            </div>
+            <div className="bg-card p-4">
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Rubric underrated</p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-foreground">{agreement.underrated}</p>
+              <p className="mt-0.5 text-xs text-muted">better than the score suggested</p>
+            </div>
+          </div>
+
+          <p className={`mt-3 text-xs leading-relaxed ${note.confident ? "text-muted" : "text-accent"}`}>
+            {note.text}
+            {note.confident ? "" : " Do not quote this number as a guarantee yet."}
+          </p>
+        </section>
+
+        <p className="mt-6 text-xs leading-relaxed text-muted">
           Your verdict is stored next to the attempt, never inside it. Attempts stay immutable, a second
-          verdict on the same attempt is refused, and the rubric score at review time is kept so agreement
-          between the rubric and human judgement can be measured.
+          verdict on the same attempt is refused, and the rubric score at review time is kept so this
+          agreement figure can be measured rather than asserted.
         </p>
       </main>
     </div>

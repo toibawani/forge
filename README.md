@@ -259,8 +259,8 @@ docs/decisions.md                       why limits live in Postgres, levels are 
   score well. Peer or expert review is the next layer, not a model pretending to grade.
 - **Human review exists but has no reviewers yet.** The queue, verdicts and recruiter-facing counts
   are implemented; reviewer accounts must be provisioned (`update profiles set role = 'reviewer'`),
-  and no calibration data has been collected, so the rubric-vs-human agreement number is unmeasured.
-  Until reviews land, records show no verified badge — that is the intended behaviour, not a gap.
+  and the queue shows rubric-vs-human agreement with an explicit small-sample warning until 20 verdicts
+  exist. Until reviews land, records show no verified badge — that is the intended behaviour, not a gap.
 - **Pipelines have an API but no full UI.** Pipelines and their candidate counts are listed; creating
   a pipeline, moving stages and adding candidates is API-only today.
 - **No email delivery.** Confirmation and recovery links are sent by Supabase; weekly summaries and
