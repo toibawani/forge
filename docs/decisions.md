@@ -221,3 +221,7 @@ flow and is not yet installed (it needs a running database).
 **Tradeoff.** Requires Node ≥ 22.6 (recorded in `engines`). Tests cover logic,
 not the HTTP layer; the acceptance flow in the brief is still unproven without a
 Supabase project.
+
+## Retries are labelled, and do not count
+
+A weak attempt offers a variant: same track and shared sub-skill, a different prompt, chosen deterministically from the catalogue (`src/lib/variant.ts`). The new attempt stores `retry_of`, the streak trigger returns early when it is set, and ratings and the daily picker drop retries before rebuilding. Repeating a prompt you have already read measures memory, not the skill, so it must not extend a streak, move a rating, or count as a day's practice — while staying in the record, because hiding practice would make the record dishonest.

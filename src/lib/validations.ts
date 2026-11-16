@@ -101,6 +101,11 @@ export const challengeAttemptSchema = z.object({
     .min(1, "Add your answer before submitting")
     .max(20000, "That answer is too long"),
   idempotencyKey: z.string().min(8).max(128).optional(),
+  /**
+   * The attempt this one follows up. Recorded so a retry is labelled as one and
+   * excluded from streaks and ratings: repeating a prompt must not farm either.
+   */
+  retryOf: z.string().uuid("Invalid attempt ID").optional(),
 });
 
 // ---------------------------------------------------------------------

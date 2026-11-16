@@ -30,6 +30,8 @@ type AttemptRow = {
   created_at: string;
   practice_date: string;
   time_spent_seconds: number;
+  /** Set on retries, which are excluded from ratings and the picker. */
+  retry_of: string | null;
   challenges:
     | {
         title: string;
@@ -109,7 +111,7 @@ export default async function DashboardPage() {
     supabase
       .from("challenge_attempts")
       .select(
-        "id, challenge_id, score, created_at, practice_date, time_spent_seconds, challenges(title, category, difficulty, slug, track, initial_rating, sub_skills)"
+        "id, challenge_id, score, created_at, practice_date, time_spent_seconds, retry_of, challenges(title, category, difficulty, slug, track, initial_rating, sub_skills)"
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
@@ -171,8 +173,10 @@ export default async function DashboardPage() {
     })),
   });
 
-  // Ratings run over the same immutable log the rest of this page reads.
-  const ratingAttempts: RatingAttempt[] = attempts.map((attempt) => {
+  // Ratings run over the same immutable log the rest of this page reads, minus
+  // retries: repeating a prompt must not move a rating.
+  const rankedAttempts = attempts.filter((attempt) => !attempt.retry_of);
+  const ratingAttempts: RatingAttempt[] = rankedAttempts.map((attempt) => {
     const relation = attemptChallenge(attempt);
     return {
       track: relation?.track ?? relation?.category ?? "general",
@@ -196,7 +200,7 @@ export default async function DashboardPage() {
       difficultyRating: (row.initial_rating as number | null) ?? 1500,
     })),
     attempts: ratingAttempts,
-    attemptedSlugs: attempts.map((attempt) => ({
+    attemptedSlugs: rankedAttempts.map((attempt) => ({
       slug: attemptChallenge(attempt)?.slug ?? "",
       at: attempt.created_at,
     })).filter((entry) => entry.slug.length > 0),

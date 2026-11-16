@@ -6,6 +6,7 @@ import { buttonStyles, eyebrowStyles } from "@/components/ui/styles";
 import { minutesLabel, parseRubric, recommendNext, scoreBand, skillLabel } from "@/lib/challenges";
 import { benchmarkFor } from "@/lib/benchmark";
 import { challengeFromRow } from "@/lib/challenge-row";
+import { variantPick } from "@/lib/variant";
 import { compareAnswer, highestLeverageFix } from "@/lib/answer-diff";
 import { buildFeedback, type AttemptFeedback, type FeedbackDimension } from "@/lib/feedback";
 import {
@@ -54,7 +55,7 @@ type AttemptRowWithCategory = {
   score: number | null;
   practice_date: string;
   created_at: string;
-  challenges: { category: string } | { category: string }[] | null;
+  challenges: { category: string; slug?: string } | { category: string; slug?: string }[] | null;
 };
 
 const DIMENSION_ORDER: FeedbackDimension[] = ["completeness", "structure", "specificity"];
@@ -134,7 +135,7 @@ export default async function AttemptResultPage({
   const [attemptsResult, streakResult, catalogueResult] = await Promise.all([
     supabase
       .from("challenge_attempts")
-      .select("id, challenge_id, score, practice_date, created_at, challenges(category)")
+      .select("id, challenge_id, score, practice_date, created_at, challenges(category, slug)")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(120),
@@ -146,7 +147,7 @@ export default async function AttemptResultPage({
     supabase
       .from("challenges")
       .select(
-        "id, slug, title, description, difficulty, category, estimated_minutes, time_limit_seconds, content, rubric"
+        "id, slug, title, description, difficulty, category, estimated_minutes, time_limit_seconds, content, rubric, track, sub_skills, initial_rating"
       )
       .eq("is_active", true),
   ]);
@@ -266,6 +267,22 @@ export default async function AttemptResultPage({
       rubric: parseRubric(row.rubric),
     })),
     attempts: allAttempts,
+  });
+
+  const variant = variantPick({
+    challenges: (catalogueResult.data ?? []).map((row) => ({
+      slug: row.slug as string,
+      track: (row.track as string | null) ?? (row.category as string),
+      subSkills: ((row.sub_skills as string[] | null) ?? [row.category as string]).filter(Boolean),
+      difficultyRating: (row.initial_rating as number | null) ?? 1500,
+    })),
+    currentSlug: (challengeRow?.slug as string) ?? slug,
+    attemptedSlugs: allRows
+      .map((row) => {
+        const relation = Array.isArray(row.challenges) ? row.challenges[0] : row.challenges;
+        return relation?.slug ?? "";
+      })
+      .filter((value) => value.length > 0),
   });
 
   const streak = streakResult.data;
@@ -441,6 +458,18 @@ export default async function AttemptResultPage({
               <p className="mt-3 border-t border-primary/20 pt-3 text-xs leading-relaxed text-muted">
                 {feedback.focus}
               </p>
+            ) : null}
+
+            {variant ? (
+              <div className="mt-4 border-t border-primary/20 pt-3">
+                <p className="text-xs leading-relaxed text-muted">{variant.reason}</p>
+                <Link
+                  href={`/practice/${variant.slug}?retryOf=${attemptId}`}
+                  className={`${buttonStyles("secondary", "md")} mt-3`}
+                >
+                  Try a variant of this skill
+                </Link>
+              </div>
             ) : null}
           </section>
         ) : null}

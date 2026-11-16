@@ -135,10 +135,19 @@ create table if not exists public.challenge_attempts (
   status text not null default 'completed' check (status in ('completed', 'failed', 'abandoned')),
   practice_date date not null default ((now() at time zone 'utc')::date),
   idempotency_key text unique,
+  -- Set when this attempt follows up another one on the same skill. Retries stay
+  -- in the record but do not extend a streak or move a rating.
+  retry_of uuid references public.challenge_attempts (id) on delete set null,
   -- Data minimisation: we keep a salted hash for abuse investigation, not raw IPs.
   ip_hash text,
   created_at timestamptz not null default now()
 );
+
+-- Existing databases predate `retry_of`.
+alter table public.challenge_attempts
+  add column if not exists retry_of uuid references public.challenge_attempts (id) on delete set null;
+
+create index if not exists idx_attempts_retry_of on public.challenge_attempts (retry_of) where retry_of is not null;
 
 create index if not exists idx_attempts_user_id on public.challenge_attempts (user_id);
 create index if not exists idx_attempts_user_day on public.challenge_attempts (user_id, practice_date desc);
@@ -170,6 +179,12 @@ declare
   v_next integer;
   v_prev date;
 begin
+  -- A retry is a second attempt at the same skill on the same day, not evidence
+  -- of a new day's practice.
+  if new.retry_of is not null then
+    return new;
+  end if;
+
   v_day := coalesce(new.practice_date, (new.created_at at time zone 'utc')::date);
 
   insert into public.streaks (user_id)

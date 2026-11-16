@@ -15,10 +15,19 @@ export const dynamic = "force-dynamic";
 
 export default async function ChallengePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ retryOf?: string | string[] }>;
 }) {
   const { slug } = await params;
+  const { retryOf: retryParam } = await searchParams;
+  // Only a shape-valid id is forwarded; ownership is checked server-side when
+  // the attempt is written, so a guessed id resolves to nothing.
+  const retryOf =
+    typeof retryParam === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(retryParam)
+      ? retryParam
+      : undefined;
 
   const session = await getServerUser();
   if (!session) redirect(`/login?next=/practice/${slug}`);
@@ -75,7 +84,18 @@ export default async function ChallengePage({
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{challenge.description}</p>
 
-        <PracticeRunner challenge={challenge} consentMissing={!profileResult.data?.consent_at} />
+        {retryOf ? (
+          <p className="mt-4 rounded border border-card-border bg-card px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+            This is a retry: a different prompt on the same skill. It is labelled in your record and does
+            not extend your streak.
+          </p>
+        ) : null}
+
+        <PracticeRunner
+          challenge={challenge}
+          consentMissing={!profileResult.data?.consent_at}
+          retryOf={retryOf}
+        />
       </main>
     </div>
   );

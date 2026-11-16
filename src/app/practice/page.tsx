@@ -39,7 +39,9 @@ export default async function PracticePage() {
       .eq("is_active", true),
     supabase
       .from("challenge_attempts")
-      .select("challenge_id, score, practice_date, created_at, time_spent_seconds, challenges(category)")
+      .select(
+        "challenge_id, score, practice_date, created_at, time_spent_seconds, retry_of, challenges(category)"
+      )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(200),
@@ -93,10 +95,15 @@ export default async function PracticePage() {
       created_at: row.created_at as string,
       category: relation?.category ?? null,
       score: (row.score as number | null) ?? null,
+      retryOf: (row.retry_of as string | null) ?? null,
     };
   });
 
-  const ratingAttempts: RatingAttempt[] = attempts.map((attempt) => {
+  // Retries are practice, but they must not move a rating: repeating a prompt
+  // you have already seen says nothing about the skill.
+  const rankedAttempts = attempts.filter((attempt) => attempt.retryOf === null);
+
+  const ratingAttempts: RatingAttempt[] = rankedAttempts.map((attempt) => {
     const meta = metaByChallengeId.get(attempt.challenge_id);
     return {
       track: meta?.track ?? attempt.category ?? "general",
@@ -133,7 +140,7 @@ export default async function PracticePage() {
       };
     }),
     attempts: ratingAttempts,
-    attemptedSlugs: attempts
+    attemptedSlugs: rankedAttempts
       .filter((attempt) => attempt.slug.length > 0)
       .map((attempt) => ({ slug: attempt.slug, at: attempt.created_at })),
     today: new Date().toISOString().slice(0, 10),
