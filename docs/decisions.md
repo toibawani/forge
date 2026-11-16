@@ -67,6 +67,39 @@ surface should be.
 management, the JSON loader is replaced by a table read and the file becomes the
 seed — the schema and IDs are already stable enough for that.
 
+## Ratings are Glicko-2 and always rebuildable from the attempt log
+
+**Decision.** A rating per user per track and per sub-skill, updated with
+Glicko-2. The outcome of an attempt is its normalised score, not a win, so a 72
+on a hard challenge and a 72 on an easy one are different events. The stored
+number is a cache of `rebuildRating(attempts)`, which is the source.
+
+**Rejected.** (a) Elo: one number with no interval, so a rating from three
+attempts looks as certain as one from thirty. (b) A stored XP or level table: a
+second source of truth that drifts the first time a rule changes. (c) Hiding the
+uncertainty and showing "1420": the interval is the part that stops a rating from
+being read as a grade.
+
+**Tradeoff.** Glicko-2 is more code than Elo and its volatility step is easy to
+get wrong, so the update is unit-tested for direction, for the deviation floor
+and ceiling, and for order-independent rebuilding. Ratings at 350 deviation are
+shown as "too few attempts to place this yet" rather than as a number.
+
+## The daily pick is deterministic, not random
+
+**Decision.** `pickChallenge` is a pure function of the candidate set, the
+sub-skill ratings, the last attempt per tag and the date. Same day, same inputs,
+same challenge; a refresh never reshuffles the day.
+
+**Order.** Never repeat inside 14 days; on a scheduled day, prefer a tag last
+practised 3–10 days ago (the window where re-testing helps); otherwise the
+challenge whose expected score is closest to 0.7, nudged toward the weakest tag
+so a gap gets practice rather than avoidance.
+
+**Tradeoff.** There is no exploration randomness, so a cohort sees a similar
+sequence. That is the right trade for a trust product: a user should be able to
+ask why they got this challenge and receive an answer, not a coin flip.
+
 ## The attempt route picks its grader from the challenge format
 
 **Decision.** `resolveGradingPlan` chooses sandbox, rubric or rubric-v1 purely
