@@ -51,6 +51,40 @@ it would put invented praise next to a score people may be judged on.
 answer is thin on evidence. That limitation is stated in the README rather than
 papered over, and it is the reason human review is the next phase.
 
+## Environment validation warns in development, fails in production
+
+**Decision.** `src/lib/env-schema.ts` parses the environment with Zod and is
+called from `instrumentation.ts` once per server start. Missing required values
+throw in production at boot; in development they print one warning line per key
+and the marketing, status and legal pages keep working.
+
+**Rejected.** (a) Validating at first request: the failure surfaces in front of
+whoever tried to practise, with no operator watching. (b) Validating during
+`next build`: a machine without secrets cannot build, which makes CI and preview
+deployments worse. (c) Validating in every module that reads `process.env`: nine
+copies of the rules, guaranteed to drift.
+
+**Tradeoff.** Development can run with an incomplete environment, so a missing
+key is a console line rather than a crash. That is the right trade for a
+repository people clone before they have a database, and the production path
+still refuses to start.
+
+## One SQL file, applied twice safely
+
+**Decision.** `supabase/schema.sql` stays the single source of truth and is
+written to be idempotent; `scripts/db-apply.sh` applies it plus `seed.sql`.
+
+**Rejected.** Introducing a `migrations/` directory by copying the 1,300-line
+schema into `0001_init.sql`. Two copies of the same DDL drift the first time
+someone edits one of them, and this project has no migration history to
+preserve.
+
+**Tradeoff.** No ordered migrations means no way to express a destructive
+change as a step. When the first one is needed, the file becomes
+`migrations/0001_baseline.sql` copied verbatim, and subsequent changes get their
+own numbered files. That is a five-minute change, not a design decision worth
+paying for today.
+
 ## Levels are computed, never stored
 
 **Decision.** Level is derived at read time from attempts.
