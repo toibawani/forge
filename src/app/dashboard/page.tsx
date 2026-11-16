@@ -12,6 +12,10 @@ import {
   scoreTrend,
   type ScoredAttempt,
 } from "@/lib/progression";
+import { TRACK_NAMES } from "@/lib/track-registry";
+import { UNRATED_CHALLENGE_DEVIATION, ratingViews, type RatingAttempt } from "@/lib/ratings";
+import { dailyPick } from "@/lib/daily-pick";
+import { localDay, previousDay } from "@/lib/timezone";
 
 export const metadata: Metadata = {
   title: "Dashboard — Forge",
@@ -27,27 +31,45 @@ type AttemptRow = {
   created_at: string;
   practice_date: string;
   time_spent_seconds: number;
+  /** Set on retries, which are excluded from ratings and the picker. */
+  retry_of: string | null;
   challenges:
-    | { title: string; category: string; difficulty: string; slug: string }
-    | { title: string; category: string; difficulty: string; slug: string }[]
+    | {
+        title: string;
+        category: string;
+        difficulty: string;
+        slug: string;
+        track: string | null;
+        initial_rating: number | null;
+        sub_skills: string[] | null;
+      }
+    | {
+        title: string;
+        category: string;
+        difficulty: string;
+        slug: string;
+        track: string | null;
+        initial_rating: number | null;
+        sub_skills: string[] | null;
+      }[]
     | null;
 };
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+/**
+ * The last `count` local days, newest last. Stepping the calendar rather than
+ * subtracting 86 400 seconds keeps the window aligned with the days the attempts
+ * are stamped with, including across a DST change.
+ */
+function lastDays(count: number, timeZone: string): string[] {
+  const days: string[] = [];
+  let day = localDay(new Date(), timeZone);
 
-function isoDay(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
+  for (let index = 0; index < count; index += 1) {
+    days.unshift(day);
+    day = previousDay(day);
+  }
 
-function lastDays(count: number): string[] {
-  const today = new Date();
-  return Array.from({ length: count }, (_, index) =>
-    isoDay(new Date(today.getTime() - (count - 1 - index) * DAY_MS))
-  );
-}
-
-function previousDayIso(): string {
-  return isoDay(new Date(Date.now() - DAY_MS));
+  return days;
 }
 
 function attemptChallenge(attempt: AttemptRow) {
@@ -78,7 +100,7 @@ export default async function DashboardPage() {
     supabase
       .from("profiles")
       .select(
-        "display_name, role, visibility, consent_at, consent_policy_version, deletion_scheduled_for, created_at"
+        "display_name, role, visibility, consent_at, consent_policy_version, deletion_scheduled_for, created_at, timezone"
       )
       .eq("id", user.id)
       .maybeSingle(),
@@ -90,14 +112,16 @@ export default async function DashboardPage() {
     supabase
       .from("challenge_attempts")
       .select(
-        "id, challenge_id, score, created_at, practice_date, time_spent_seconds, challenges(title, category, difficulty, slug)"
+        "id, challenge_id, score, created_at, practice_date, time_spent_seconds, retry_of, challenges(title, category, difficulty, slug, track, initial_rating, sub_skills)"
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(120),
     supabase
       .from("challenges")
-      .select("id, slug, title, description, difficulty, category, estimated_minutes, time_limit_seconds")
+      .select(
+        "id, slug, title, description, difficulty, category, estimated_minutes, time_limit_seconds, track, sub_skills, initial_rating"
+      )
       .eq("is_active", true),
   ]);
 
@@ -112,20 +136,22 @@ export default async function DashboardPage() {
     category: attemptChallenge(attempt)?.category ?? null,
   }));
 
-  const days = lastDays(14);
+  const days = lastDays(14, (profileResult.data?.timezone as string | null) ?? "UTC");
   const practicedDays = new Set(attempts.map((attempt) => attempt.practice_date));
   const weekly = consistencyTrend(scoredAttempts, 7);
   const scores = scoreTrend(scoredAttempts, 5);
   const overall = progressFor(scoredAttempts);
   const levels = levelsByCategory(scoredAttempts);
 
-  const today = isoDay(new Date());
+  // A practice day is the person's local calendar day, not the server's UTC day.
+  const timeZone = (profileResult.data?.timezone as string | null) ?? "UTC";
+  const today = localDay(new Date(), timeZone);
   const practicedToday = practicedDays.has(today);
   const todayAttempt = practicedToday
     ? attempts.find((attempt) => attempt.practice_date === today) ?? null
     : null;
   const currentStreak = streak?.current_streak ?? 0;
-  const streakAtRisk = !practicedToday && streak?.last_practice_date === previousDayIso();
+  const streakAtRisk = !practicedToday && streak?.last_practice_date === previousDay(today);
   const milestone = nextMilestone(currentStreak);
 
   const recommendation = recommendNext({
@@ -149,6 +175,42 @@ export default async function DashboardPage() {
       created_at: attempt.created_at,
     })),
   });
+
+  // Ratings run over the same immutable log the rest of this page reads, minus
+  // retries: repeating a prompt must not move a rating.
+  const rankedAttempts = attempts.filter((attempt) => !attempt.retry_of);
+  const ratingAttempts: RatingAttempt[] = rankedAttempts.map((attempt) => {
+    const relation = attemptChallenge(attempt);
+    return {
+      track: relation?.track ?? relation?.category ?? "general",
+      subSkills: relation?.sub_skills ?? (relation?.category ? [relation.category] : []),
+      score: attempt.score,
+      challengeRating: relation?.initial_rating ?? 1500,
+      challengeDeviation: UNRATED_CHALLENGE_DEVIATION,
+      at: attempt.created_at,
+    };
+  });
+  const trackRatings = ratingViews(
+    ratingAttempts,
+    TRACK_NAMES
+  );
+
+  const pick = dailyPick({
+    challenges: (catalogueResult.data ?? []).map((row) => ({
+      slug: row.slug as string,
+      track: (row.track as string | null) ?? (row.category as string),
+      subSkills: ((row.sub_skills as string[] | null) ?? [row.category as string]).filter(Boolean),
+      difficultyRating: (row.initial_rating as number | null) ?? 1500,
+    })),
+    attempts: ratingAttempts,
+    attemptedSlugs: rankedAttempts.map((attempt) => ({
+      slug: attemptChallenge(attempt)?.slug ?? "",
+      at: attempt.created_at,
+    })).filter((entry) => entry.slug.length > 0),
+    today: new Date().toISOString().slice(0, 10),
+  });
+
+  const todayReason = pick?.reason ?? recommendation?.reason ?? null;
 
   const skills = Array.from(levels.entries())
     .sort((a, b) => b[1].days - a[1].days)
@@ -253,7 +315,7 @@ export default async function DashboardPage() {
               {recommendation ? (
                 <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
                   Next: <span className="text-foreground">{recommendation.challenge.title}</span> —{" "}
-                  {recommendation.reason}
+                  {todayReason}
                 </p>
               ) : null}
             </div>
@@ -280,6 +342,39 @@ export default async function DashboardPage() {
             </div>
           </div>
         </section>
+
+        {trackRatings.length > 0 ? (
+          <section className="mt-6 rounded border border-card-border bg-card" aria-labelledby="ratings-heading">
+            <div className="flex flex-col gap-1 border-b border-card-border px-5 py-3 sm:flex-row sm:items-baseline sm:justify-between">
+              <h2 id="ratings-heading" className="text-sm font-medium text-foreground">
+                Rating by skill
+              </h2>
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                Glicko-2 · rebuilt from attempts
+              </p>
+            </div>
+
+            <ul className="divide-y divide-card-border">
+              {trackRatings.map((rating) => (
+                <li
+                  key={rating.track}
+                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-4"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm text-foreground">{rating.trackName}</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted">{rating.description}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-mono text-sm tabular-nums text-foreground">{rating.label}</p>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {rating.attempts} scored attempt{rating.attempts === 1 ? "" : "s"}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         <div className="mt-6 grid gap-px overflow-hidden rounded border border-card-border bg-card-border sm:grid-cols-2 lg:grid-cols-4">
           <div className="bg-card p-5">

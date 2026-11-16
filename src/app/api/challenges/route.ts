@@ -95,6 +95,24 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
     return fail(410, "session_expired", "That session expired. Start the challenge again.");
   }
 
+  // A retry must reference something the caller owns (RLS) and must be a
+  // different challenge: repeating the same prompt is not a variant.
+  if (input.retryOf) {
+    const { data: previous } = await supabase
+      .from("challenge_attempts")
+      .select("id, challenge_id")
+      .eq("id", input.retryOf)
+      .maybeSingle();
+
+    if (!previous) {
+      return fail(404, "retry_not_found", "That earlier attempt is not in your record.");
+    }
+
+    if (previous.challenge_id === input.challengeId) {
+      return fail(400, "retry_same_challenge", "A retry needs a different challenge.");
+    }
+  }
+
   const elapsedSeconds = Math.min(
     MAX_SESSION_SECONDS,
     Math.max(1, Math.round((now - startedAt) / 1000))
@@ -167,6 +185,7 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
       time_spent_seconds: elapsedSeconds,
       status: "completed",
       idempotency_key: input.idempotencyKey ?? null,
+      retry_of: input.retryOf ?? null,
       ip_hash: ipHash,
     })
     .select("id, score, practice_date, created_at, time_spent_seconds")

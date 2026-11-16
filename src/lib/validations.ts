@@ -89,6 +89,11 @@ export const reviewSchema = z.object({
 
 export const startPracticeSessionSchema = z.object({
   challengeId: z.string().uuid("Invalid challenge ID"),
+  /**
+   * The browser's IANA zone. Stored on the profile so the attempt's practice day
+   * matches the person's calendar; validated against Intl, not just by shape.
+   */
+  timeZone: z.string().max(64).optional(),
 });
 
 export const challengeAttemptSchema = z.object({
@@ -101,6 +106,11 @@ export const challengeAttemptSchema = z.object({
     .min(1, "Add your answer before submitting")
     .max(20000, "That answer is too long"),
   idempotencyKey: z.string().min(8).max(128).optional(),
+  /**
+   * The attempt this one follows up. Recorded so a retry is labelled as one and
+   * excluded from streaks and ratings: repeating a prompt must not farm either.
+   */
+  retryOf: z.string().uuid("Invalid attempt ID").optional(),
 });
 
 // ---------------------------------------------------------------------

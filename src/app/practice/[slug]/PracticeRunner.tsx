@@ -26,9 +26,12 @@ function BriefBlock({ label, children }: { label: string; children: React.ReactN
 export function PracticeRunner({
   challenge,
   consentMissing,
+  retryOf,
 }: {
   challenge: Challenge;
   consentMissing: boolean;
+  /** Set when this attempt is a labelled retry of an earlier one. */
+  retryOf?: string;
 }) {
   const router = useRouter();
   const [session, setSession] = useState<SessionState | null>(null);
@@ -52,7 +55,12 @@ export function PracticeRunner({
     fetch("/api/practice/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ challengeId: challenge.id }),
+      body: JSON.stringify({
+        challengeId: challenge.id,
+        // The zone only decides which local day the attempt belongs to; the
+        // server validates it before storing it on the profile.
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
     })
       .then(async (response) => ({ response, payload: await response.json().catch(() => null) }))
       .then(({ response, payload }) => {
@@ -171,6 +179,7 @@ export function PracticeRunner({
           sessionId: session.id,
           answer: answer.trim(),
           idempotencyKey,
+          retryOf,
         }),
       });
       const payload = await response.json().catch(() => null);
@@ -199,7 +208,7 @@ export function PracticeRunner({
       setError("Network error. Your answer is saved on this device — try submitting again.");
       setSubmitting(false);
     }
-  }, [answer, challenge.id, challenge.slug, expired, idempotencyKey, router, session, storageKey, submitting]);
+  }, [answer, challenge.id, challenge.slug, expired, idempotencyKey, retryOf, router, session, storageKey, submitting]);
 
   const wordCount = answer.trim() ? answer.trim().split(/\s+/).filter(Boolean).length : 0;
   const minWords = challenge.rubric.min_words ?? 25;

@@ -20,9 +20,56 @@
 
 create extension if not exists pgcrypto;
 
+create or replace function public.set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- profiles
+-- Deliberately does NOT store email: email lives only in auth.users and is
+-- never exposed through a public row. This removes the most common PII leak
+-- (a "public profile" policy that also exposes contact details).
+-- ---------------------------------------------------------------------
+
+create table if not exists public.profiles (
+  id uuid primary key references auth.users (id) on delete cascade,
+  display_name text check (display_name is null or char_length(display_name) between 2 and 60),
+  headline text check (headline is null or char_length(headline) <= 120),
+  bio text check (bio is null or char_length(bio) <= 500),
+  avatar_url text,
+  skills text[] not null default '{}',
+  role text not null default 'practitioner' check (role in ('practitioner', 'recruiter', 'admin')),
+  company_name text check (company_name is null or char_length(company_name) <= 120),
+  visibility text not null default 'private' check (visibility in ('public', 'recruiters_only', 'private')),
+  allow_recruiter_contact boolean not null default true,
+  -- IANA zone, set from the browser and validated server-side. Used to derive
+  -- which local day an attempt belongs to; UTC is the documented fallback.
+  timezone text not null default 'UTC',
+  profile_views_count integer not null default 0,
+  -- Consent state (DPDP): the version accepted and when. Purpose-level
+  -- detail lives in public.user_consents.
+  consent_at timestamptz,
+  consent_policy_version text,
+  -- Erasure lifecycle. `deleted_at` marks an anonymised tombstone; rows are
+  -- hard deleted by the erasure job after the grace period.
+  deletion_requested_at timestamptz,
+  deletion_scheduled_for timestamptz,
+  deleted_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 -- ---------------------------------------------------------------------
 -- Helper functions (security definer so RLS policies can read profiles
--- without recursing into the profiles policies themselves)
+-- without recursing into the profiles policies themselves). Defined after the
+-- table they read: a SQL function body is validated at creation, so declaring
+-- these first fails a from-zero apply.
 -- ---------------------------------------------------------------------
 
 create or replace function public.is_admin()
@@ -55,48 +102,6 @@ revoke all on function public.is_admin() from public;
 revoke all on function public.is_recruiter() from public;
 grant execute on function public.is_admin() to authenticated, service_role;
 grant execute on function public.is_recruiter() to authenticated, service_role;
-
-create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-as $$
-begin
-  new.updated_at = now();
-  return new;
-end;
-$$;
-
--- ---------------------------------------------------------------------
--- profiles
--- Deliberately does NOT store email: email lives only in auth.users and is
--- never exposed through a public row. This removes the most common PII leak
--- (a "public profile" policy that also exposes contact details).
--- ---------------------------------------------------------------------
-
-create table if not exists public.profiles (
-  id uuid primary key references auth.users (id) on delete cascade,
-  display_name text check (display_name is null or char_length(display_name) between 2 and 60),
-  headline text check (headline is null or char_length(headline) <= 120),
-  bio text check (bio is null or char_length(bio) <= 500),
-  avatar_url text,
-  skills text[] not null default '{}',
-  role text not null default 'practitioner' check (role in ('practitioner', 'recruiter', 'admin')),
-  company_name text check (company_name is null or char_length(company_name) <= 120),
-  visibility text not null default 'private' check (visibility in ('public', 'recruiters_only', 'private')),
-  allow_recruiter_contact boolean not null default true,
-  profile_views_count integer not null default 0,
-  -- Consent state (DPDP): the version accepted and when. Purpose-level
-  -- detail lives in public.user_consents.
-  consent_at timestamptz,
-  consent_policy_version text,
-  -- Erasure lifecycle. `deleted_at` marks an anonymised tombstone; rows are
-  -- hard deleted by the erasure job after the grace period.
-  deletion_requested_at timestamptz,
-  deletion_scheduled_for timestamptz,
-  deleted_at timestamptz,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
 
 -- ---------------------------------------------------------------------
 -- challenges (public catalogue, read-only to clients)
@@ -135,10 +140,19 @@ create table if not exists public.challenge_attempts (
   status text not null default 'completed' check (status in ('completed', 'failed', 'abandoned')),
   practice_date date not null default ((now() at time zone 'utc')::date),
   idempotency_key text unique,
+  -- Set when this attempt follows up another one on the same skill. Retries stay
+  -- in the record but do not extend a streak or move a rating.
+  retry_of uuid references public.challenge_attempts (id) on delete set null,
   -- Data minimisation: we keep a salted hash for abuse investigation, not raw IPs.
   ip_hash text,
   created_at timestamptz not null default now()
 );
+
+-- Existing databases predate `retry_of`.
+alter table public.challenge_attempts
+  add column if not exists retry_of uuid references public.challenge_attempts (id) on delete set null;
+
+create index if not exists idx_attempts_retry_of on public.challenge_attempts (retry_of) where retry_of is not null;
 
 create index if not exists idx_attempts_user_id on public.challenge_attempts (user_id);
 create index if not exists idx_attempts_user_day on public.challenge_attempts (user_id, practice_date desc);
@@ -170,6 +184,12 @@ declare
   v_next integer;
   v_prev date;
 begin
+  -- A retry is a second attempt at the same skill on the same day, not evidence
+  -- of a new day's practice.
+  if new.retry_of is not null then
+    return new;
+  end if;
+
   v_day := coalesce(new.practice_date, (new.created_at at time zone 'utc')::date);
 
   insert into public.streaks (user_id)
@@ -213,6 +233,42 @@ begin
   return new;
 end;
 $$;
+
+alter table public.profiles
+  add column if not exists timezone text not null default 'UTC';
+
+-- A day is local. The UTC instant stays on the row; the day people see is
+-- derived from their profile timezone at insert time, so a client cannot claim
+-- a day and a late-night attempt counts on the day the person actually worked.
+create or replace function public.set_practice_date()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_zone text;
+begin
+  select timezone into v_zone from public.profiles where id = new.user_id;
+
+  -- An unknown zone falls back to UTC rather than failing the insert: the
+  -- attempt matters more than the calendar arithmetic.
+  begin
+    new.practice_date := ((coalesce(new.created_at, now())) at time zone coalesce(v_zone, 'UTC'))::date;
+  exception
+    when invalid_parameter_value then
+      new.practice_date := ((coalesce(new.created_at, now())) at time zone 'UTC')::date;
+  end;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists set_practice_date_before_insert on public.challenge_attempts;
+
+create trigger set_practice_date_before_insert
+  before insert on public.challenge_attempts
+  for each row execute function public.set_practice_date();
 
 drop trigger if exists on_attempt_recorded on public.challenge_attempts;
 create trigger on_attempt_recorded
@@ -499,7 +555,13 @@ begin
     raise exception 'profile_id_immutable' using errcode = 'check_violation';
   end if;
 
-  if new.role is distinct from old.role and not public.is_admin() then
+  -- Roles are only changed by an admin session, or by the service role used for
+  -- provisioning. A practitioner's own JWT is `authenticated`, and a client can
+  -- neither mint a service_role token nor bypass RLS with the anon key, so the
+  -- escalation path stays server-side.
+  if new.role is distinct from old.role
+    and not public.is_admin()
+    and coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'role_change_not_allowed' using errcode = 'insufficient_privilege';
   end if;
 

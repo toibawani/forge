@@ -34,7 +34,9 @@ begin
   on conflict (id) do nothing;
 
   -- Reviewer accounts are provisioned, not self-selected: the signup trigger
-  -- only accepts practitioner or recruiter, so promote explicitly as postgres.
+  -- only accepts practitioner or recruiter, so promotion goes through the
+  -- service role, which is the only session that may change a role.
+  perform set_config('request.jwt.claims', json_build_object('role', 'service_role')::text, true);
   update public.profiles set role = 'reviewer' where id = rev;
 
   -- Alice makes her profile recruiter-discoverable and logs one attempt.
@@ -273,6 +275,86 @@ begin
   if n <> 1 then
     raise exception 'REVIEW: author cannot see their own review summary (% rows)', n;
   end if;
+end;
+$$;
+
+-- 20-24. Grades: owner-readable, client-unwritable, immutable.
+do $$
+declare
+  alice uuid := '00000000-0000-4000-8000-000000000001';
+  bob uuid := '00000000-0000-4000-8000-000000000002';
+  alice_attempt uuid;
+  grade uuid;
+  n integer;
+begin
+  -- The previous block left the caller as `authenticated`; fixtures are written
+  -- with owner rights, while the app itself can only use the function below.
+  execute 'reset role';
+  perform set_config('request.jwt.claims', '', true);
+
+  select id into alice_attempt
+  from public.challenge_attempts
+  where user_id = alice
+  order by created_at
+  limit 1;
+
+  if alice_attempt is null then
+    raise exception 'GRADES: fixture attempt missing';
+  end if;
+
+  -- Written as postgres: the app writes through the function, not directly.
+  insert into public.attempt_grades (
+    attempt_id, user_id, challenge_slug, challenge_version, score, grader, grader_version
+  )
+  values (alice_attempt, alice, 'grade-fixture', 1, 78, 'sandbox', 'sandbox-v1')
+  returning id into grade;
+
+  -- 20. The owner reads their own grade.
+  perform set_config('request.jwt.claims', json_build_object('sub', alice, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+
+  select count(*) into n from public.attempt_grades where id = grade;
+  if n <> 1 then
+    raise exception 'GRADES: owner cannot read own grade (% rows)', n;
+  end if;
+
+  -- 21. Another practitioner cannot see it.
+  execute 'reset role';
+  perform set_config('request.jwt.claims', json_build_object('sub', bob, 'role', 'authenticated')::text, true);
+  execute 'set local role authenticated';
+
+  select count(*) into n from public.attempt_grades where id = grade;
+  if n <> 0 then
+    raise exception 'IDOR: bob can read alice''s grade (% rows)', n;
+  end if;
+
+  -- 22. A client cannot insert a grade directly, so a score cannot be invented.
+  begin
+    insert into public.attempt_grades (
+      attempt_id, user_id, challenge_slug, challenge_version, score, grader, grader_version
+    )
+    values (alice_attempt, alice, 'forged', 1, 100, 'sandbox', 'forged');
+    raise exception 'GRADES: client inserted a grade directly';
+  exception
+    when insufficient_privilege then null;
+  end;
+
+  -- 23. The function refuses to grade someone else's attempt.
+  begin
+    perform public.record_attempt_grade(alice_attempt, 100, 'sandbox', 'forged');
+    raise exception 'IDOR: bob graded alice''s attempt';
+  exception
+    when insufficient_privilege then null;
+  end;
+
+  -- 24. Even the table owner cannot rewrite a grade: the evidence stays put.
+  execute 'reset role';
+  begin
+    update public.attempt_grades set score = 100 where id = grade;
+    raise exception 'GRADES: a recorded grade was updated';
+  exception
+    when restrict_violation then null;
+  end;
 end;
 $$;
 
