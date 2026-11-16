@@ -1,0 +1,18 @@
+{
+  "slug": "writing-service-outage-reply",
+  "note": "Anchor answers with the score range each should land in. Calibration fails if any anchor lands outside its range. Eight is the target; with fewer, `npm run challenge:calibrate` warns instead of pretending the range is stable.",
+  "anchors": [
+    {
+      "id": "strong",
+      "min": 70,
+      "max": 92,
+      "answer": "Your account was affected by an overrun of our 02:00 maintenance window. A job that should have stopped at 03:00 ran until 08:30 and sent duplicate invoice emails to 412 customers, including you. We stopped the job, corrected the invoice records, and confirmed no payment was taken twice. You do not need to do anything. We will publish a post-incident note this week explaining the guard that failed and what we are changing. If your records still show a duplicate, reply here and we will correct it the same day."
+    },
+    {
+      "id": "weak",
+      "min": 6,
+      "max": 35,
+      "answer": "Hi, sorry for the inconvenience, we had some issues with our maintenance and you may have received some emails. Everything is fine now and it should be resolved. Let us know if you have any questions."
+    }
+  ]
+}
