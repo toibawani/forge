@@ -99,6 +99,21 @@ export function fail(
   );
 }
 
+/**
+ * 429 with a `Retry-After` header.
+ *
+ * A bare JSON error tells a client it failed but not when to come back, so it
+ * retries into the same wall. The header is derived from the limiter's own reset
+ * time rather than a guessed constant, so a one-hour window is not reported as
+ * sixty seconds.
+ */
+export function rateLimited(message: string, resetTimeMs: number): NextResponse {
+  const seconds = Math.max(1, Math.ceil((resetTimeMs - Date.now()) / 1000));
+  const response = fail(429, "rate_limited", message);
+  response.headers.set("Retry-After", String(seconds));
+  return response;
+}
+
 function allowedOrigins(): string[] {
   const { appUrl } = getPublicEnv();
   const origins = new Set<string>();

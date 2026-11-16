@@ -1,4 +1,4 @@
-import { apiRoute, created, fail, readJson } from "@/lib/api";
+import { apiRoute, created, fail, rateLimited, readJson } from "@/lib/api";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { rateLimit } from "@/lib/rate-limit";
 import { hashIp, requestIp } from "@/lib/request-meta";
@@ -16,7 +16,7 @@ export const POST = apiRoute(
   async ({ request, requestId, supabase, user, profile }) => {
     const rate = await rateLimit(`review-submit:${user.id}`, 60, 60 * 1000);
     if (!rate.success) {
-      return fail(429, "rate_limited", "You are reviewing quickly. Pause and try again.");
+      return rateLimited("You are reviewing quickly. Pause and try again.", rate.resetTime);
     }
 
     const input = await readJson(request, reviewSchema);

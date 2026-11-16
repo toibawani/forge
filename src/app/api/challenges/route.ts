@@ -1,4 +1,4 @@
-import { apiRoute, created, fail, ok, readJson } from "@/lib/api";
+import { apiRoute, created, fail, ok, rateLimited, readJson } from "@/lib/api";
 import { challengeAttemptSchema } from "@/lib/validations";
 import { scoreSubmission, type Rubric } from "@/lib/scoring";
 import { buildFeedback } from "@/lib/feedback";
@@ -53,7 +53,7 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
   const ipHash = hashIp(requestIp(request.headers));
   const rate = await rateLimit(`attempt:${user.id}`, 30, 60 * 60 * 1000);
   if (!rate.success) {
-    return fail(429, "rate_limited", "You have logged a lot of practice today. Come back later.");
+    return rateLimited("You have logged a lot of practice today. Come back later.", rate.resetTime);
   }
 
   if (!profile.consent_at) {

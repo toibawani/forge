@@ -1,4 +1,4 @@
-import { apiRoute, fail, ok } from "@/lib/api";
+import { apiRoute, fail, ok, rateLimited } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
 
 /**
@@ -12,7 +12,7 @@ export const GET = apiRoute(
   async ({ request, user, supabase }) => {
     const rate = await rateLimit(`review-queue:${user.id}`, 60, 60 * 1000);
     if (!rate.success) {
-      return fail(429, "rate_limited", "Slow down for a moment.");
+      return rateLimited("Slow down for a moment.", rate.resetTime);
     }
 
     const limitParam = new URL(request.url).searchParams.get("limit");

@@ -46,6 +46,20 @@ guess. The product says that plainly rather than overselling it.
   (`days_30d`, `strong_days_90d`, `avg_score_90d`, `last_attempt_at`), and search ranks by recent
   activity rather than a lifetime streak.
 
+### Interface and API behaviour
+
+- **The landing page states the limits.** The four things Forge cannot do — score a person rather
+  than an answer, certify identity, benchmark a crowd of three, auto-reject on integrity signals —
+  are on the page, not in a footnote. The example scorecard is labelled *illustrative* on the card
+  itself, because a fabricated record presented as real would contradict the product's argument.
+- **⌘K searches the catalogue.** The palette fetches the public challenge list once per session and
+  matches titles, skills, slugs and difficulty, so a specific brief is two keystrokes away. If the
+  fetch fails, navigation still works.
+- **429s carry `Retry-After`.** Derived from the limiter's own reset time, so an hourly window is not
+  reported as sixty seconds and a client can back off instead of retrying into the same wall.
+- **The crawl surface is deliberate.** `sitemap.xml` lists public pages; `robots.txt` closes every
+  session area, API route and practice record. Personal records also carry `noindex` themselves.
+
 ## Tech stack
 
 | Layer | Choice |
@@ -212,6 +226,8 @@ produces no email rather than a zero.
 /privacy, /privacy/hindi policy in English and Hindi
 /terms                   terms of service
 /status                  human-readable deployment health (same checks as /api/health)
+/sitemap.xml             public pages only
+/robots.txt              crawlers allowed on marketing/legal, closed everywhere else
 
 POST   /api/auth/signup | login | logout | forgot-password | reset-password
 GET    /api/auth/…       (session cookie based, httpOnly)

@@ -1,4 +1,4 @@
-import { apiRoute, created, fail, readJson } from "@/lib/api";
+import { apiRoute, created, fail, rateLimited, readJson } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
 import { startPracticeSessionSchema } from "@/lib/validations";
 
@@ -12,7 +12,7 @@ import { startPracticeSessionSchema } from "@/lib/validations";
 export const POST = apiRoute(async ({ request, supabase, user, profile }) => {
   const rate = await rateLimit(`session:${user.id}`, 40, 60 * 60 * 1000);
   if (!rate.success) {
-    return fail(429, "rate_limited", "You have opened a lot of sessions today. Try again shortly.");
+    return rateLimited("You have opened a lot of sessions today. Try again shortly.", rate.resetTime);
   }
 
   if (!profile.consent_at) {

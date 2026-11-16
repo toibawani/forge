@@ -1,4 +1,4 @@
-import { apiRoute, fail, ok, readJson } from "@/lib/api";
+import { apiRoute, fail, ok, rateLimited, readJson } from "@/lib/api";
 import { logger } from "@/lib/logger";
 import { rateLimit } from "@/lib/rate-limit";
 import { newPasswordSchema } from "@/lib/validations";
@@ -14,7 +14,7 @@ import { newPasswordSchema } from "@/lib/validations";
 export const POST = apiRoute(async ({ request, requestId, supabase, user }) => {
   const rate = await rateLimit(`password-set:${user.id}`, 5, 10 * 60 * 1000);
   if (!rate.success) {
-    return fail(429, "rate_limited", "Too many attempts. Wait ten minutes and try again.");
+    return rateLimited("Too many attempts. Wait ten minutes and try again.", rate.resetTime);
   }
 
   const input = await readJson(request, newPasswordSchema);

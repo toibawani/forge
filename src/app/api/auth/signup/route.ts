@@ -1,4 +1,4 @@
-import { apiRoute, created, fail, readJson } from "@/lib/api";
+import { apiRoute, created, fail, rateLimited, readJson } from "@/lib/api";
 import { POLICY_VERSION } from "@/lib/dpdp";
 import { rateLimit } from "@/lib/rate-limit";
 import { hashIp, requestIp } from "@/lib/request-meta";
@@ -20,7 +20,7 @@ export const POST = apiRoute(
 
     const rate = await rateLimit(`signup:${ipHash ?? "anonymous"}`, 5, 60 * 60 * 1000);
     if (!rate.success) {
-      return fail(429, "rate_limited", "Too many sign-up attempts. Try again later.");
+      return rateLimited("Too many sign-up attempts. Try again later.", rate.resetTime);
     }
 
     const input = await readJson(request, signUpSchema);
@@ -56,7 +56,7 @@ export const POST = apiRoute(
       logger.warn("Signup rejected", { code: error.code, status: error.status }, undefined, requestId);
 
       if (error.status === 429) {
-        return fail(429, "rate_limited", "Too many attempts. Try again in a few minutes.");
+        return rateLimited("Too many attempts. Try again in a few minutes.", Date.now() + 5 * 60 * 1000);
       }
 
       if (error.code === "weak_password" || error.code === "signup_disabled") {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { buildPaletteResults, type PaletteChallenge, type PaletteItem } from "@/lib/palette";
 
 /**
  * Keyboard navigation (⌘K / Ctrl+K).
@@ -12,7 +13,7 @@ import { usePathname, useRouter } from "next/navigation";
  * stays out of the way of the practice runner's fixed action bar.
  */
 
-const ITEMS: Array<{ href: string; label: string; hint: string }> = [
+const ITEMS: PaletteItem[] = [
   { href: "/dashboard", label: "Dashboard", hint: "streak, trends, today's session" },
   { href: "/practice", label: "Practice", hint: "pick today's challenge" },
   { href: "/profile", label: "Skill record", hint: "every attempt, in order" },
@@ -30,7 +31,9 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
+  const [challenges, setChallenges] = useState<PaletteChallenge[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const catalogueLoaded = useRef(false);
 
   const enabled = ENABLED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
   const hideTrigger = RUNNER_PATTERN.test(pathname);
@@ -54,15 +57,32 @@ export function CommandPalette() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [enabled]);
 
+  // The catalogue is public, so it is worth fetching once per session rather
+  // than shipping forty challenges in the bundle. A failure leaves navigation
+  // intact — the palette degrades quietly instead of breaking.
+  useEffect(() => {
+    if (!open || catalogueLoaded.current) return;
+    catalogueLoaded.current = true;
+
+    fetch("/api/challenges")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        const rows = (payload?.challenges ?? []) as Array<{
+          slug: string;
+          title: string;
+          category: string;
+          difficulty: string;
+        }>;
+        setChallenges(rows);
+      })
+      .catch(() => {
+        // Keep whatever we had; the palette still navigates.
+      });
+  }, [open]);
+
   if (!enabled) return null;
 
-  const needle = query.trim().toLowerCase();
-  const results = needle
-    ? ITEMS.filter(
-        (item) =>
-          item.label.toLowerCase().includes(needle) || item.hint.toLowerCase().includes(needle)
-      )
-    : ITEMS;
+  const results = buildPaletteResults(ITEMS, challenges, query);
   const index = results.length === 0 ? 0 : Math.min(active, results.length - 1);
 
   function move(delta: number) {

@@ -1,4 +1,4 @@
-import { apiRoute, fail, ok, readJson } from "@/lib/api";
+import { apiRoute, fail, ok, rateLimited, readJson } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
 import { hashIp, requestIp } from "@/lib/request-meta";
 import { signInSchema } from "@/lib/validations";
@@ -14,7 +14,7 @@ export const POST = apiRoute(
 
     const rate = await rateLimit(`login:${ipHash ?? "anonymous"}`, 10, 5 * 60 * 1000);
     if (!rate.success) {
-      return fail(429, "rate_limited", "Too many sign-in attempts. Wait a few minutes and try again.");
+      return rateLimited("Too many sign-in attempts. Wait a few minutes and try again.", rate.resetTime);
     }
 
     const input = await readJson(request, signInSchema);

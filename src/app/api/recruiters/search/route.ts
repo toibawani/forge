@@ -1,4 +1,4 @@
-import { apiRoute, fail, ok } from "@/lib/api";
+import { apiRoute, fail, ok, rateLimited } from "@/lib/api";
 import { recruiterSearchSchema } from "@/lib/validations";
 import { logAuditEvent } from "@/lib/audit-logger";
 import { hashIp, requestIp } from "@/lib/request-meta";
@@ -16,7 +16,7 @@ export const GET = apiRoute(
     const ipHash = hashIp(requestIp(request.headers));
     const rate = await rateLimit(`recruiter-search:${user.id}`, 30, 60 * 1000);
     if (!rate.success) {
-      return fail(429, "rate_limited", "Too many searches. Wait a minute.");
+      return rateLimited("Too many searches. Wait a minute.", rate.resetTime);
     }
 
     const { searchParams } = new URL(request.url);

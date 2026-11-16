@@ -1,4 +1,4 @@
-import { apiRoute, fail, ok, readJson } from "@/lib/api";
+import { apiRoute, ok, rateLimited, readJson } from "@/lib/api";
 import { getPublicEnv } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { rateLimit } from "@/lib/rate-limit";
@@ -18,7 +18,7 @@ export const POST = apiRoute(
 
     const rate = await rateLimit(`password-reset:${ipHash ?? "anonymous"}`, 5, 60 * 60 * 1000);
     if (!rate.success) {
-      return fail(429, "rate_limited", "Too many reset requests. Try again in an hour.");
+      return rateLimited("Too many reset requests. Try again in an hour.", rate.resetTime);
     }
 
     const input = await readJson(request, forgotPasswordSchema);
@@ -33,7 +33,7 @@ export const POST = apiRoute(
 
       // Provider-side throttling is worth surfacing; anything else stays opaque.
       if (error.status === 429) {
-        return fail(429, "rate_limited", "Too many reset requests. Try again in an hour.");
+        return rateLimited("Too many reset requests. Try again in an hour.", Date.now() + 10 * 60 * 1000);
       }
     }
 
