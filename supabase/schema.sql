@@ -20,42 +20,6 @@
 
 create extension if not exists pgcrypto;
 
--- ---------------------------------------------------------------------
--- Helper functions (security definer so RLS policies can read profiles
--- without recursing into the profiles policies themselves)
--- ---------------------------------------------------------------------
-
-create or replace function public.is_admin()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select coalesce(
-    (select p.role = 'admin' from public.profiles p where p.id = auth.uid()),
-    false
-  );
-$$;
-
-create or replace function public.is_recruiter()
-returns boolean
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select coalesce(
-    (select p.role in ('recruiter', 'admin') from public.profiles p where p.id = auth.uid()),
-    false
-  );
-$$;
-
-revoke all on function public.is_admin() from public;
-revoke all on function public.is_recruiter() from public;
-grant execute on function public.is_admin() to authenticated, service_role;
-grant execute on function public.is_recruiter() to authenticated, service_role;
-
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -100,6 +64,44 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- ---------------------------------------------------------------------
+-- Helper functions (security definer so RLS policies can read profiles
+-- without recursing into the profiles policies themselves). Defined after the
+-- table they read: a SQL function body is validated at creation, so declaring
+-- these first fails a from-zero apply.
+-- ---------------------------------------------------------------------
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (select p.role = 'admin' from public.profiles p where p.id = auth.uid()),
+    false
+  );
+$$;
+
+create or replace function public.is_recruiter()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(
+    (select p.role in ('recruiter', 'admin') from public.profiles p where p.id = auth.uid()),
+    false
+  );
+$$;
+
+revoke all on function public.is_admin() from public;
+revoke all on function public.is_recruiter() from public;
+grant execute on function public.is_admin() to authenticated, service_role;
+grant execute on function public.is_recruiter() to authenticated, service_role;
 
 -- ---------------------------------------------------------------------
 -- challenges (public catalogue, read-only to clients)
@@ -553,7 +555,13 @@ begin
     raise exception 'profile_id_immutable' using errcode = 'check_violation';
   end if;
 
-  if new.role is distinct from old.role and not public.is_admin() then
+  -- Roles are only changed by an admin session, or by the service role used for
+  -- provisioning. A practitioner's own JWT is `authenticated`, and a client can
+  -- neither mint a service_role token nor bypass RLS with the anon key, so the
+  -- escalation path stays server-side.
+  if new.role is distinct from old.role
+    and not public.is_admin()
+    and coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'role_change_not_allowed' using errcode = 'insufficient_privilege';
   end if;
 

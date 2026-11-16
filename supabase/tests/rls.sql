@@ -34,7 +34,9 @@ begin
   on conflict (id) do nothing;
 
   -- Reviewer accounts are provisioned, not self-selected: the signup trigger
-  -- only accepts practitioner or recruiter, so promote explicitly as postgres.
+  -- only accepts practitioner or recruiter, so promotion goes through the
+  -- service role, which is the only session that may change a role.
+  perform set_config('request.jwt.claims', json_build_object('role', 'service_role')::text, true);
   update public.profiles set role = 'reviewer' where id = rev;
 
   -- Alice makes her profile recruiter-discoverable and logs one attempt.
@@ -285,6 +287,11 @@ declare
   grade uuid;
   n integer;
 begin
+  -- The previous block left the caller as `authenticated`; fixtures are written
+  -- with owner rights, while the app itself can only use the function below.
+  execute 'reset role';
+  perform set_config('request.jwt.claims', '', true);
+
   select id into alice_attempt
   from public.challenge_attempts
   where user_id = alice
