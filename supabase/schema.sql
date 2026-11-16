@@ -84,6 +84,9 @@ create table if not exists public.profiles (
   company_name text check (company_name is null or char_length(company_name) <= 120),
   visibility text not null default 'private' check (visibility in ('public', 'recruiters_only', 'private')),
   allow_recruiter_contact boolean not null default true,
+  -- IANA zone, set from the browser and validated server-side. Used to derive
+  -- which local day an attempt belongs to; UTC is the documented fallback.
+  timezone text not null default 'UTC',
   profile_views_count integer not null default 0,
   -- Consent state (DPDP): the version accepted and when. Purpose-level
   -- detail lives in public.user_consents.
@@ -228,6 +231,42 @@ begin
   return new;
 end;
 $$;
+
+alter table public.profiles
+  add column if not exists timezone text not null default 'UTC';
+
+-- A day is local. The UTC instant stays on the row; the day people see is
+-- derived from their profile timezone at insert time, so a client cannot claim
+-- a day and a late-night attempt counts on the day the person actually worked.
+create or replace function public.set_practice_date()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_zone text;
+begin
+  select timezone into v_zone from public.profiles where id = new.user_id;
+
+  -- An unknown zone falls back to UTC rather than failing the insert: the
+  -- attempt matters more than the calendar arithmetic.
+  begin
+    new.practice_date := ((coalesce(new.created_at, now())) at time zone coalesce(v_zone, 'UTC'))::date;
+  exception
+    when invalid_parameter_value then
+      new.practice_date := ((coalesce(new.created_at, now())) at time zone 'UTC')::date;
+  end;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists set_practice_date_before_insert on public.challenge_attempts;
+
+create trigger set_practice_date_before_insert
+  before insert on public.challenge_attempts
+  for each row execute function public.set_practice_date();
 
 drop trigger if exists on_attempt_recorded on public.challenge_attempts;
 create trigger on_attempt_recorded

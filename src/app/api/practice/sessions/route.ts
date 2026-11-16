@@ -1,6 +1,7 @@
 import { apiRoute, created, fail, rateLimited, readJson } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
 import { startPracticeSessionSchema } from "@/lib/validations";
+import { isValidTimeZone } from "@/lib/timezone";
 
 /**
  * Opens a practice session before the prompt is shown.
@@ -24,6 +25,13 @@ export const POST = apiRoute(async ({ request, supabase, user, profile }) => {
   }
 
   const input = await readJson(request, startPracticeSessionSchema);
+
+  // The zone is unverified client input, so it is resolved against Intl before
+  // it is stored. An unresolvable zone is ignored rather than rejected: the
+  // session still opens on the profile's existing zone.
+  if (input.timeZone && isValidTimeZone(input.timeZone) && input.timeZone !== profile.timezone) {
+    await supabase.from("profiles").update({ timezone: input.timeZone }).eq("id", user.id);
+  }
 
   const { data: challenge } = await supabase
     .from("challenges")

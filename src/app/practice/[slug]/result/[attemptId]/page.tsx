@@ -7,6 +7,7 @@ import { minutesLabel, parseRubric, recommendNext, scoreBand, skillLabel } from 
 import { benchmarkFor } from "@/lib/benchmark";
 import { challengeFromRow } from "@/lib/challenge-row";
 import { variantPick } from "@/lib/variant";
+import { localDay } from "@/lib/timezone";
 import { compareAnswer, highestLeverageFix } from "@/lib/answer-diff";
 import { buildFeedback, type AttemptFeedback, type FeedbackDimension } from "@/lib/feedback";
 import {
@@ -60,9 +61,6 @@ type AttemptRowWithCategory = {
 
 const DIMENSION_ORDER: FeedbackDimension[] = ["completeness", "structure", "specificity"];
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 function parseFeedback(value: unknown): AttemptFeedback | null {
   if (!value || typeof value !== "object") return null;
@@ -132,7 +130,7 @@ export default async function AttemptResultPage({
   const category = challengeRow?.category ?? null;
   const rubric = parseRubric(challengeRow?.rubric);
 
-  const [attemptsResult, streakResult, catalogueResult] = await Promise.all([
+  const [attemptsResult, streakResult, catalogueResult, profileResult] = await Promise.all([
     supabase
       .from("challenge_attempts")
       .select("id, challenge_id, score, practice_date, created_at, challenges(category, slug)")
@@ -150,6 +148,7 @@ export default async function AttemptResultPage({
         "id, slug, title, description, difficulty, category, estimated_minutes, time_limit_seconds, content, rubric, track, sub_skills, initial_rating"
       )
       .eq("is_active", true),
+    supabase.from("profiles").select("timezone").eq("id", user.id).maybeSingle(),
   ]);
 
   const { data: statsRow } = await supabase
@@ -287,7 +286,9 @@ export default async function AttemptResultPage({
 
   const streak = streakResult.data;
   const milestone = nextMilestone(streak?.current_streak ?? 0);
-  const loggedToday = streak?.last_practice_date === todayIso();
+  const loggedToday =
+    streak?.last_practice_date ===
+    localDay(new Date(), (profileResult.data?.timezone as string | null) ?? "UTC");
 
   return (
     <div className="min-h-screen">

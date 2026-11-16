@@ -46,19 +46,49 @@ test("another track is never suggested", () => {
   assert.equal(pick, null);
 });
 
-test("more shared sub-skills wins, then nearest difficulty, then slug order", () => {
+test("more shared sub-skills wins over a closer difficulty", () => {
   const pick = variantPick({
     challenges: [
-      { slug: "b", track: "coding", subSkills: ["performance"], difficultyRating: 1700 },
-      { slug: "c", track: "coding", subSkills: ["performance", "sql"], difficultyRating: 1600 },
-      { slug: "a", track: "coding", subSkills: ["performance"], difficultyRating: 1500 },
+      { slug: "current", track: "coding", subSkills: ["performance", "sql"], difficultyRating: 1500 },
+      { slug: "one-skill", track: "coding", subSkills: ["performance"], difficultyRating: 1500 },
+      { slug: "two-skills", track: "coding", subSkills: ["performance", "sql"], difficultyRating: 1900 },
     ],
     currentSlug: "current",
     attemptedSlugs: [],
   });
 
-  // No `current` in the list, so the pick is refused rather than guessed.
-  assert.equal(pick, null);
+  assert.ok(pick);
+  assert.equal(pick.slug, "two-skills");
+});
+
+test("at equal overlap the nearer difficulty wins", () => {
+  const pick = variantPick({
+    challenges: [
+      { slug: "current", track: "coding", subSkills: ["performance"], difficultyRating: 1500 },
+      { slug: "far", track: "coding", subSkills: ["performance"], difficultyRating: 1800 },
+      { slug: "near", track: "coding", subSkills: ["performance"], difficultyRating: 1520 },
+    ],
+    currentSlug: "current",
+    attemptedSlugs: [],
+  });
+
+  assert.ok(pick);
+  assert.equal(pick.slug, "near");
+});
+
+test("a full tie falls back to slug order, so the link is stable", () => {
+  const pick = variantPick({
+    challenges: [
+      { slug: "current", track: "coding", subSkills: ["performance"], difficultyRating: 1500 },
+      { slug: "zebra", track: "coding", subSkills: ["performance"], difficultyRating: 1500 },
+      { slug: "alpha", track: "coding", subSkills: ["performance"], difficultyRating: 1500 },
+    ],
+    currentSlug: "current",
+    attemptedSlugs: [],
+  });
+
+  assert.ok(pick);
+  assert.equal(pick.slug, "alpha");
 });
 
 test("the shared sub-skill is named in the reason", () => {

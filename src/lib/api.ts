@@ -25,6 +25,8 @@ export type SessionProfile = {
   consent_at: string | null;
   consent_policy_version: string | null;
   deletion_requested_at: string | null;
+  /** IANA zone, used to derive a local practice day. */
+  timezone: string;
 };
 
 export type RouteContext = {
@@ -251,7 +253,7 @@ export function apiRoute(
 
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")
-        .select("id, role, visibility, consent_at, consent_policy_version, deletion_requested_at")
+        .select("id, role, visibility, consent_at, consent_policy_version, deletion_requested_at, timezone")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -267,6 +269,7 @@ export function apiRoute(
         consent_at: null,
         consent_policy_version: null,
         deletion_requested_at: null,
+        timezone: "UTC",
       };
 
       if (profile.deletion_requested_at && !options.allowPendingDeletion) {

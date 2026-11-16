@@ -55,7 +55,12 @@ export function PracticeRunner({
     fetch("/api/practice/sessions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ challengeId: challenge.id }),
+      body: JSON.stringify({
+        challengeId: challenge.id,
+        // The zone only decides which local day the attempt belongs to; the
+        // server validates it before storing it on the profile.
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
     })
       .then(async (response) => ({ response, payload: await response.json().catch(() => null) }))
       .then(({ response, payload }) => {

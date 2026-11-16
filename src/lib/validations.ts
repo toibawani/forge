@@ -89,6 +89,11 @@ export const reviewSchema = z.object({
 
 export const startPracticeSessionSchema = z.object({
   challengeId: z.string().uuid("Invalid challenge ID"),
+  /**
+   * The browser's IANA zone. Stored on the profile so the attempt's practice day
+   * matches the person's calendar; validated against Intl, not just by shape.
+   */
+  timeZone: z.string().max(64).optional(),
 });
 
 export const challengeAttemptSchema = z.object({

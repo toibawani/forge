@@ -225,3 +225,7 @@ Supabase project.
 ## Retries are labelled, and do not count
 
 A weak attempt offers a variant: same track and shared sub-skill, a different prompt, chosen deterministically from the catalogue (`src/lib/variant.ts`). The new attempt stores `retry_of`, the streak trigger returns early when it is set, and ratings and the daily picker drop retries before rebuilding. Repeating a prompt you have already read measures memory, not the skill, so it must not extend a streak, move a rating, or count as a day's practice — while staying in the record, because hiding practice would make the record dishonest.
+
+## A practice day is the person's local day
+
+The attempt keeps the UTC instant; the calendar day is derived at insert time from `profiles.timezone` in a `before insert` trigger, so a 01:30 attempt in Kolkata belongs to that local day rather than yesterday in UTC, and a client cannot claim a day. The zone is captured from `Intl` when a session opens, validated against `Intl` on the server, and ignored if unresolvable — an unknown zone falls back to UTC rather than blocking practice. Streaks and the dashboard's "practised today" use the same zone, and retries still return early in the streak trigger. Existing rows are deliberately not backfilled: rewriting recorded days would change history to fit a later rule.

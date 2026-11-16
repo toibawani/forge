@@ -16,6 +16,7 @@ import { benchmarkFor, type ChallengeStats } from "@/lib/benchmark";
 import { TRACK_NAMES } from "@/lib/track-registry";
 import { UNRATED_CHALLENGE_DEVIATION, ratingViews, type RatingAttempt } from "@/lib/ratings";
 import { dailyPick } from "@/lib/daily-pick";
+import { localDay } from "@/lib/timezone";
 
 export const metadata: Metadata = {
   title: "Practice — Forge",
@@ -45,7 +46,7 @@ export default async function PracticePage() {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(200),
-    supabase.from("profiles").select("consent_at, display_name").eq("id", user.id).maybeSingle(),
+    supabase.from("profiles").select("consent_at, display_name, timezone").eq("id", user.id).maybeSingle(),
     supabase.from("challenge_stats").select("challenge_id, attempts, median_score"),
   ]);
 
@@ -143,7 +144,7 @@ export default async function PracticePage() {
     attemptedSlugs: rankedAttempts
       .filter((attempt) => attempt.slug.length > 0)
       .map((attempt) => ({ slug: attempt.slug, at: attempt.created_at })),
-    today: new Date().toISOString().slice(0, 10),
+    today: localDay(new Date(), profileResult.data?.timezone ?? "UTC"),
   });
   const picked = pick ? challenges.find((challenge) => challenge.slug === pick.challenge.slug) ?? null : null;
   const recommendation =

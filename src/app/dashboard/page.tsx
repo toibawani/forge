@@ -15,6 +15,7 @@ import {
 import { TRACK_NAMES } from "@/lib/track-registry";
 import { UNRATED_CHALLENGE_DEVIATION, ratingViews, type RatingAttempt } from "@/lib/ratings";
 import { dailyPick } from "@/lib/daily-pick";
+import { localDay, previousDay } from "@/lib/timezone";
 
 export const metadata: Metadata = {
   title: "Dashboard — Forge",
@@ -54,21 +55,21 @@ type AttemptRow = {
     | null;
 };
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+/**
+ * The last `count` local days, newest last. Stepping the calendar rather than
+ * subtracting 86 400 seconds keeps the window aligned with the days the attempts
+ * are stamped with, including across a DST change.
+ */
+function lastDays(count: number, timeZone: string): string[] {
+  const days: string[] = [];
+  let day = localDay(new Date(), timeZone);
 
-function isoDay(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
+  for (let index = 0; index < count; index += 1) {
+    days.unshift(day);
+    day = previousDay(day);
+  }
 
-function lastDays(count: number): string[] {
-  const today = new Date();
-  return Array.from({ length: count }, (_, index) =>
-    isoDay(new Date(today.getTime() - (count - 1 - index) * DAY_MS))
-  );
-}
-
-function previousDayIso(): string {
-  return isoDay(new Date(Date.now() - DAY_MS));
+  return days;
 }
 
 function attemptChallenge(attempt: AttemptRow) {
@@ -99,7 +100,7 @@ export default async function DashboardPage() {
     supabase
       .from("profiles")
       .select(
-        "display_name, role, visibility, consent_at, consent_policy_version, deletion_scheduled_for, created_at"
+        "display_name, role, visibility, consent_at, consent_policy_version, deletion_scheduled_for, created_at, timezone"
       )
       .eq("id", user.id)
       .maybeSingle(),
@@ -135,20 +136,22 @@ export default async function DashboardPage() {
     category: attemptChallenge(attempt)?.category ?? null,
   }));
 
-  const days = lastDays(14);
+  const days = lastDays(14, (profileResult.data?.timezone as string | null) ?? "UTC");
   const practicedDays = new Set(attempts.map((attempt) => attempt.practice_date));
   const weekly = consistencyTrend(scoredAttempts, 7);
   const scores = scoreTrend(scoredAttempts, 5);
   const overall = progressFor(scoredAttempts);
   const levels = levelsByCategory(scoredAttempts);
 
-  const today = isoDay(new Date());
+  // A practice day is the person's local calendar day, not the server's UTC day.
+  const timeZone = (profileResult.data?.timezone as string | null) ?? "UTC";
+  const today = localDay(new Date(), timeZone);
   const practicedToday = practicedDays.has(today);
   const todayAttempt = practicedToday
     ? attempts.find((attempt) => attempt.practice_date === today) ?? null
     : null;
   const currentStreak = streak?.current_streak ?? 0;
-  const streakAtRisk = !practicedToday && streak?.last_practice_date === previousDayIso();
+  const streakAtRisk = !practicedToday && streak?.last_practice_date === previousDay(today);
   const milestone = nextMilestone(currentStreak);
 
   const recommendation = recommendNext({
