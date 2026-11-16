@@ -1,0 +1,48 @@
+[
+  {
+    "id": "coding",
+    "name": "Coding",
+    "description": "Functions, bugs and predictions in JavaScript and Python. Graded by hidden tests in a sandbox, never in the app process.",
+    "formats": ["code", "spot-the-bug", "predict-the-output"],
+    "languages": ["javascript", "python"],
+    "grading": "sandbox",
+    "subSkills": [
+      { "id": "arrays", "label": "Arrays and iteration" },
+      { "id": "strings", "label": "Strings" },
+      { "id": "edge-cases", "label": "Edge cases" },
+      { "id": "async", "label": "Async and promises" },
+      { "id": "complexity", "label": "Time and space" },
+      { "id": "debugging", "label": "Debugging" }
+    ]
+  },
+  {
+    "id": "sql",
+    "name": "SQL",
+    "description": "Write and repair queries against a fixed seeded dataset. Answers are compared by result set, not by text.",
+    "formats": ["fix-the-query", "code"],
+    "languages": ["sql"],
+    "grading": "sandbox",
+    "subSkills": [
+      { "id": "joins", "label": "Joins" },
+      { "id": "aggregation", "label": "Aggregation" },
+      { "id": "window-functions", "label": "Window functions" },
+      { "id": "nulls", "label": "Null handling" },
+      { "id": "indexes", "label": "Indexes and plans" }
+    ]
+  },
+  {
+    "id": "writing",
+    "name": "Writing and communication",
+    "description": "Rewrites and short answers judged on a published rubric. Every dimension score needs a quote from the submission.",
+    "formats": ["rewrite", "short-answer"],
+    "languages": [],
+    "grading": "llm",
+    "subSkills": [
+      { "id": "concision", "label": "Concision" },
+      { "id": "structure", "label": "Structure" },
+      { "id": "specificity", "label": "Specificity" },
+      { "id": "audience", "label": "Audience awareness" },
+      { "id": "clarity", "label": "Clarity" }
+    ]
+  }
+]
