@@ -13,6 +13,9 @@ import {
 } from "@/lib/challenges";
 import { levelsByCategory, progressFor, type ScoredAttempt } from "@/lib/progression";
 import { benchmarkFor, type ChallengeStats } from "@/lib/benchmark";
+import { TRACK_NAMES } from "@/lib/track-registry";
+import { UNRATED_CHALLENGE_DEVIATION, ratingViews, type RatingAttempt } from "@/lib/ratings";
+import { dailyPick } from "@/lib/daily-pick";
 
 export const metadata: Metadata = {
   title: "Practice — Forge",
@@ -31,12 +34,12 @@ export default async function PracticePage() {
     supabase
       .from("challenges")
       .select(
-        "id, slug, title, description, difficulty, category, estimated_minutes, time_limit_seconds, content, rubric"
+        "id, slug, title, description, difficulty, category, estimated_minutes, time_limit_seconds, content, rubric, track, sub_skills, initial_rating"
       )
       .eq("is_active", true),
     supabase
       .from("challenge_attempts")
-      .select("challenge_id, score, practice_date, created_at, challenges(category)")
+      .select("challenge_id, score, practice_date, created_at, time_spent_seconds, challenges(category)")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(200),
@@ -67,16 +70,46 @@ export default async function PracticePage() {
         : a.category.localeCompare(b.category)
     );
 
+  // Where a challenge sits in the rating model. Rows that predate tracks fall
+  // back to their category, so the panel still works on an older catalogue.
+  const metaByChallengeId = new Map(
+    (challengesResult.data ?? []).map((row) => [
+      row.id as string,
+      {
+        slug: row.slug as string,
+        track: (row.track as string | null) ?? (row.category as string),
+        subSkills: ((row.sub_skills as string[] | null) ?? [row.category as string]).filter(Boolean),
+        difficultyRating: (row.initial_rating as number | null) ?? 1500,
+      },
+    ])
+  );
+
   const attempts = (attemptsResult.data ?? []).map((row) => {
     const relation = Array.isArray(row.challenges) ? row.challenges[0] : row.challenges;
     return {
       challenge_id: row.challenge_id as string,
+      slug: metaByChallengeId.get(row.challenge_id as string)?.slug ?? "",
       practice_date: row.practice_date as string,
       created_at: row.created_at as string,
       category: relation?.category ?? null,
       score: (row.score as number | null) ?? null,
     };
   });
+
+  const ratingAttempts: RatingAttempt[] = attempts.map((attempt) => {
+    const meta = metaByChallengeId.get(attempt.challenge_id);
+    return {
+      track: meta?.track ?? attempt.category ?? "general",
+      subSkills: meta?.subSkills ?? (attempt.category ? [attempt.category] : []),
+      score: attempt.score,
+      challengeRating: meta?.difficultyRating ?? 1500,
+      challengeDeviation: UNRATED_CHALLENGE_DEVIATION,
+      at: attempt.created_at,
+    };
+  });
+
+  const trackNames = TRACK_NAMES;
+  const trackRatings = ratingViews(ratingAttempts, trackNames);
 
   const scoredAttempts: ScoredAttempt[] = attempts.map((attempt) => ({
     score: attempt.score,
@@ -86,7 +119,28 @@ export default async function PracticePage() {
   }));
 
   const consentMissing = !profileResult.data?.consent_at;
-  const recommendation = recommendNext({ challenges, attempts });
+
+  // The daily picker decides today's challenge; recommendNext remains the
+  // fallback for a catalogue whose rows carry no track metadata yet.
+  const pick = dailyPick({
+    challenges: challenges.map((challenge) => {
+      const meta = metaByChallengeId.get(challenge.id);
+      return {
+        slug: challenge.slug,
+        track: meta?.track ?? challenge.category,
+        subSkills: meta?.subSkills ?? [challenge.category],
+        difficultyRating: meta?.difficultyRating,
+      };
+    }),
+    attempts: ratingAttempts,
+    attemptedSlugs: attempts
+      .filter((attempt) => attempt.slug.length > 0)
+      .map((attempt) => ({ slug: attempt.slug, at: attempt.created_at })),
+    today: new Date().toISOString().slice(0, 10),
+  });
+  const picked = pick ? challenges.find((challenge) => challenge.slug === pick.challenge.slug) ?? null : null;
+  const recommendation =
+    picked && pick ? { challenge: picked, reason: pick.reason } : recommendNext({ challenges, attempts });
   const levels = levelsByCategory(scoredAttempts);
 
   const categories = Array.from(new Set(challenges.map((challenge) => challenge.category)))
@@ -133,6 +187,42 @@ export default async function PracticePage() {
           One challenge, five to fifteen minutes. The clock is server-measured and the score is computed from
           the rubric. Nothing here is editable afterwards.
         </p>
+
+        {trackRatings.length > 0 ? (
+          <section className="mt-8 rounded border border-card-border bg-card" aria-labelledby="ratings-heading">
+            <div className="flex flex-col gap-1 border-b border-card-border px-5 py-3 sm:flex-row sm:items-baseline sm:justify-between">
+              <h2 id="ratings-heading" className="text-sm font-medium text-foreground">
+                Rating by skill
+              </h2>
+              <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                Glicko-2 · the ± is how much is known
+              </p>
+            </div>
+
+            <ul className="divide-y divide-card-border">
+              {trackRatings.map((rating) => (
+                <li
+                  key={rating.track}
+                  className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 py-4"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm text-foreground">{rating.trackName}</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted">
+                      {rating.description} {rating.attempts} scored attempt
+                      {rating.attempts === 1 ? "" : "s"}.
+                    </p>
+                  </div>
+                  <p className="font-mono text-sm tabular-nums text-foreground">{rating.label}</p>
+                </li>
+              ))}
+            </ul>
+
+            <p className="border-t border-card-border px-5 py-3 text-xs leading-relaxed text-muted">
+              A rating is rebuilt from your attempts, not stored separately. A wide interval means the
+              number is still a guess.
+            </p>
+          </section>
+        ) : null}
 
         {consentMissing ? (
           <div className="mt-8 rounded border border-accent/40 bg-accent/[0.06] px-4 py-3 text-sm">
