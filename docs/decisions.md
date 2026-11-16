@@ -51,6 +51,51 @@ it would put invented praise next to a score people may be judged on.
 answer is thin on evidence. That limitation is stated in the README rather than
 papered over, and it is the reason human review is the next phase.
 
+## Tracks are a checked-in JSON file, not a database table
+
+**Decision.** `content/tracks.json` holds the three launch tracks and their
+sub-skill tags; `src/lib/tracks.ts` validates it with Zod, and challenges refer
+to a track by id. Adding a track is a JSON edit plus content, not a migration and
+a code change.
+
+**Rejected.** A `tracks` table edited from an admin UI: it would need a second
+source of truth, a caching strategy and an editing surface before there is
+anyone to edit it. Copy changes are still code review, which is what a launch
+surface should be.
+
+**Tradeoff.** Track edits ship with a deploy. When tracks genuinely need product
+management, the JSON loader is replaced by a table read and the file becomes the
+seed — the schema and IDs are already stable enough for that.
+
+## Grading adapters are not yet wired into the attempt route
+
+**Decision.** `gradeInSandbox` and `gradeRubric` exist, are tested, and are
+called by `challenge:validate` and `challenge:calibrate`. The existing attempt
+endpoint still uses the deterministic rubric-v1 scorer.
+
+**Why not switch now.** The switch makes every code and SQL submission depend on
+a Judge0 instance that is not provisioned here, and every writing submission
+depend on a model key that is not set. Shipping that unverified would break the
+one path that demonstrably works, and I cannot test it without the two
+credentials.
+
+**Tradeoff.** Phase 1 is a pipeline plus four draft challenges, not a live
+grading product. The switch is a small, contained change once `JUDGE0_URL` and
+`ANTHROPIC_API_KEY` exist, and the tests around the adapters already describe
+the behaviour the route has to call.
+
+## Hidden tests are removed by construction, not by convention
+
+**Decision.** `publicChallenge()` is the only projection a client may receive;
+its return type has no `tests` and no `reference` field. Test categories are
+exposed so feedback can name what failed without naming the input.
+
+**Rejected.** Returning the full document and asking callers to strip fields:
+that is a leak waiting for the next contributor who forgets.
+
+**Tradeoff.** The projection is a second shape to keep in sync with the model.
+The compiler catches a missing field; a forgotten filter in a route would not.
+
 ## Environment validation warns in development, fails in production
 
 **Decision.** `src/lib/env-schema.ts` parses the environment with Zod and is
