@@ -92,6 +92,37 @@ guess. The product says that plainly rather than overselling it.
 - **The crawl surface is deliberate.** `sitemap.xml` lists public pages; `robots.txt` closes every
   session area, API route and practice record. Personal records also carry `noindex` themselves.
 
+## Challenge system and grading (Phase 1)
+
+Tracks are data: `content/tracks.json` defines Coding, SQL and Writing with their
+sub-skill tags, formats and grading mode. Challenges live in
+`content/challenges/*.json` and validate against a versioned model
+(`src/lib/challenge-model.ts`) where an attempt pins `(slug, version)` and a
+published challenge is superseded, never edited.
+
+Two grading paths, both tested without external services:
+
+| Path | Code | What it does |
+|---|---|---|
+| Sandbox | `src/lib/sandbox-core.ts`, `judge0-client.ts` | Batches hidden tests to Judge0, maps statuses, scores 75% correctness / 15% efficiency / 10% time. Hidden inputs and expected outputs never reach the client. |
+| Rubric | `src/lib/grader/*` | Grades writing on 0–4 dimensions, two samples, a third on disagreement, median per dimension, and every score must quote the submission. Model output is Zod-validated; injection attempts are flagged, not silently scored. |
+
+```bash
+npm run challenge:validate            # schema, track rules, slugs, draft status
+npm run challenge:validate -- --run   # also executes reference solutions (needs JUDGE0_URL)
+npm run challenge:calibrate           # anchor answers must land in range (needs ANTHROPIC_API_KEY)
+```
+
+Grades are immutable rows in `attempt_grades`, written only through a
+security-definer function that checks the caller owns the attempt; a trigger
+refuses updates and deletes.
+
+The attempt endpoint chooses by format: sandbox for test-graded formats, rubric
+for writing, and rubric-v1 when a key is missing (`fallback:*` is stored in the
+flags). Rows with no `model` document stay on rubric-v1. A configured grader that
+fails mid-run stores the attempt as `pending` with no score rather than
+substituting another grader — see `docs/decisions.md`.
+
 ## Tech stack
 
 | Layer | Choice |

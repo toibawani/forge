@@ -1,0 +1,101 @@
+[
+  {
+    "slug": "writing-status-update",
+    "track": "writing",
+    "format": "rewrite",
+    "title": "Tighten a vague status update",
+    "prompt": "Rewrite the update below so a busy reader can act on it in ten seconds. Keep every fact in the original, remove the hedging, and make the next step explicit. Do not invent facts.",
+    "given": "We are generally making good progress on the migration and have been working closely with stakeholders to align on the approach, with a few remaining items still being discussed and we hope to have more clarity soon.",
+    "constraints": ["45 words or fewer", "No invented facts", "One clear next step"],
+    "timeLimitSeconds": 600,
+    "estimatedMinutes": 7,
+    "subSkills": ["concision", "clarity"],
+    "initialRating": 1500,
+    "version": 1,
+    "status": "draft",
+    "reference": {
+      "kind": "answer",
+      "body": "The migration is on track. Requirements are aligned with stakeholders; several items are unresolved. Next: name an owner for each open item by Friday so the remaining scope can be closed.",
+      "notes": "The rewrite has to say what is unresolved and who does what next. Everything else is the original padding."
+    },
+    "rubric": {
+      "minWords": 20,
+      "dimensions": [
+        {
+          "id": "concision",
+          "label": "Concision",
+          "description": "Every word carries information. Hedges, filler and restatement are removed.",
+          "weight": 2,
+          "maxScore": 4
+        },
+        {
+          "id": "fidelity",
+          "label": "Fidelity",
+          "description": "Every fact in the original survives and nothing new is invented.",
+          "weight": 2,
+          "maxScore": 4
+        },
+        {
+          "id": "next-step",
+          "label": "Next step",
+          "description": "A specific action, owner or deadline follows from the update.",
+          "weight": 1,
+          "maxScore": 4
+        }
+      ]
+    }
+  },
+  {
+    "slug": "writing-service-outage-reply",
+    "track": "writing",
+    "format": "short-answer",
+    "title": "Reply to a customer after an outage",
+    "prompt": "A scheduled maintenance window overran by three hours. During the overrun, some customers received duplicate invoice emails. Write the reply to an affected customer. State what happened, what you have already done, and what happens next. Do not promise a refund or compensation that has not been approved, and do not blame a colleague or a vendor.",
+    "given": "Timeline\n02:00 maintenance started\n03:00 window was due to close\n06:00 duplicate invoice emails sent to 412 customers\n08:30 job stopped, duplicates confirmed, data corrected",
+    "constraints": ["150 words or fewer", "No compensation promises", "No blame"],
+    "timeLimitSeconds": 900,
+    "estimatedMinutes": 10,
+    "subSkills": ["clarity", "audience"],
+    "initialRating": 1550,
+    "version": 1,
+    "status": "draft",
+    "reference": {
+      "kind": "answer",
+      "body": "Your account was affected by an overrun of our 02:00 maintenance window. A job that should have stopped at 03:00 kept running until 08:30 and sent duplicate invoice emails to 412 customers, including you. We stopped the job, corrected the invoice records, and confirmed that no payment was taken twice. You do not need to do anything. We will publish a short post-incident note this week covering the guard that failed and what we are changing. If your records still show a duplicate, reply to this message and we will correct it the same day.",
+      "notes": "Names the cause without blaming a person, states the remedy, and points at a next step without promising money."
+    },
+    "rubric": {
+      "minWords": 60,
+      "dimensions": [
+        {
+          "id": "honesty",
+          "label": "Honesty",
+          "description": "States what happened and its impact plainly, including that duplicate emails were sent.",
+          "weight": 2,
+          "maxScore": 4
+        },
+        {
+          "id": "ownership",
+          "label": "Ownership",
+          "description": "Takes responsibility for the failure without blaming a person or vendor.",
+          "weight": 1,
+          "maxScore": 4
+        },
+        {
+          "id": "action",
+          "label": "Action",
+          "description": "Says what has already been done and what happens next, with a concrete route to follow up.",
+          "weight": 2,
+          "maxScore": 4
+        },
+        {
+          "id": "restraint",
+          "label": "Restraint",
+          "description": "Makes no promise of compensation and no claim that cannot be supported by the timeline.",
+          "weight": 1,
+          "maxScore": 4
+        }
+      ]
+    }
+  }
+]

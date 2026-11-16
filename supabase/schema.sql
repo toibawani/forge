@@ -1297,3 +1297,150 @@ group by a.challenge_id;
 
 revoke all on public.challenge_stats from anon;
 grant select on public.challenge_stats to authenticated;
+
+-- ---------------------------------------------------------------------
+-- Phase 1: challenge catalogue v2 and immutable grades
+--
+-- `challenges` keeps its original columns so existing rows and the current
+-- runnable path keep working. The new columns describe the versioned model:
+-- a published challenge is never edited in place, only superseded.
+-- ---------------------------------------------------------------------
+
+alter table public.challenges
+  add column if not exists track text,
+  add column if not exists format text default 'short-answer',
+  add column if not exists prompt text,
+  add column if not exists given text,
+  add column if not exists constraints text[] not null default '{}',
+  add column if not exists sub_skills text[] not null default '{}',
+  add column if not exists version integer not null default 1,
+  add column if not exists status text not null default 'published',
+  add column if not exists variant_of text,
+  add column if not exists tests jsonb not null default '[]'::jsonb,
+  add column if not exists reference jsonb,
+  add column if not exists initial_rating numeric not null default 1500;
+
+alter table public.challenges
+  drop constraint if exists challenges_status_check;
+
+alter table public.challenges
+  add constraint challenges_status_check
+  check (status in ('draft', 'published', 'retired'));
+
+create index if not exists idx_challenges_track_status
+  on public.challenges (track, status);
+
+-- The version is part of the identity of a published challenge: two rows may
+-- share a slug if and only if they are different versions.
+create unique index if not exists uniq_challenges_slug_version
+  on public.challenges (slug, version);
+
+-- ---------------------------------------------------------------------
+-- attempt_grades — one immutable record per grading run
+--
+-- A re-grade inserts a new row. Nothing in the app may update or delete a
+-- grade, which is what makes an old score still mean what it meant.
+-- ---------------------------------------------------------------------
+
+create table if not exists public.attempt_grades (
+  id uuid primary key default gen_random_uuid(),
+  attempt_id uuid not null references public.challenge_attempts (id) on delete cascade,
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  challenge_slug text not null,
+  challenge_version integer not null,
+  score integer not null check (score >= 0 and score <= 100),
+  grader text not null check (grader in ('sandbox', 'llm')),
+  grader_version text not null,
+  rubric_version text,
+  model text,
+  dimensions jsonb not null default '[]'::jsonb,
+  flags text[] not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_attempt_grades_user on public.attempt_grades (user_id, created_at desc);
+create index if not exists idx_attempt_grades_attempt on public.attempt_grades (attempt_id);
+
+alter table public.attempt_grades enable row level security;
+
+drop policy if exists "grades readable by owner" on public.attempt_grades;
+create policy "grades readable by owner"
+  on public.attempt_grades for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+-- No insert, update or delete policy: writes happen only through the
+-- security-definer function below, so a client cannot invent a score.
+revoke insert, update, delete on public.attempt_grades from anon, authenticated;
+
+create or replace function public.record_attempt_grade(
+  p_attempt_id uuid,
+  p_score integer,
+  p_grader text,
+  p_grader_version text,
+  p_rubric_version text default null,
+  p_model text default null,
+  p_dimensions jsonb default '[]'::jsonb,
+  p_flags text[] default '{}'
+)
+returns public.attempt_grades
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_attempt public.challenge_attempts;
+  v_challenge public.challenges;
+  v_row public.attempt_grades;
+begin
+  select * into v_attempt from public.challenge_attempts where id = p_attempt_id;
+  if v_attempt.id is null then
+    raise exception 'attempt_not_found' using errcode = 'no_data_found';
+  end if;
+
+  -- The caller must own the attempt: a grade is never written for someone else.
+  if v_attempt.user_id <> auth.uid() then
+    raise exception 'not_attempt_owner' using errcode = 'insufficient_privilege';
+  end if;
+
+  select * into v_challenge from public.challenges where id = v_attempt.challenge_id;
+  if v_challenge.id is null then
+    raise exception 'challenge_not_found' using errcode = 'no_data_found';
+  end if;
+
+  insert into public.attempt_grades (
+    attempt_id, user_id, challenge_slug, challenge_version, score,
+    grader, grader_version, rubric_version, model, dimensions, flags
+  )
+  values (
+    p_attempt_id, v_attempt.user_id, coalesce(v_challenge.slug, ''), coalesce(v_challenge.version, 1),
+    p_score, p_grader, p_grader_version, p_rubric_version, p_model, p_dimensions, p_flags
+  )
+  returning * into v_row;
+
+  return v_row;
+end;
+$$;
+
+revoke all on function public.record_attempt_grade(uuid, integer, text, text, text, text, jsonb, text[]) from anon;
+grant execute on function public.record_attempt_grade(uuid, integer, text, text, text, text, jsonb, text[]) to authenticated;
+
+-- Belt and braces: even the owner cannot rewrite a grade after the fact.
+create or replace function public.reject_grade_mutation()
+returns trigger
+language plpgsql
+as $$
+begin
+  raise exception 'grades_are_immutable' using errcode = 'restrict_violation';
+end;
+$$;
+
+drop trigger if exists trg_attempt_grades_immutable on public.attempt_grades;
+create trigger trg_attempt_grades_immutable
+  before update or delete on public.attempt_grades
+  for each row execute function public.reject_grade_mutation();
+
+-- The full Phase 1 challenge document (tests, reference, rubric dimensions).
+-- Null means the row predates Phase 1 and stays on rubric-v1 grading.
+alter table public.challenges
+  add column if not exists model jsonb;

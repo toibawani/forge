@@ -1,0 +1,97 @@
+[
+  {
+    "slug": "coding-chunk-array",
+    "track": "coding",
+    "format": "code",
+    "title": "Chunk a list",
+    "prompt": "Read two lines from standard input. The first line is a comma-separated list of integers (it may be empty). The second line is a chunk size. Print a JSON array of chunks, each of at most that size, in order. Use console.log for the result and read input from stdin.",
+    "given": "Input\n1,2,3,4,5\n2\n\nOutput\n[[1,2],[3,4],[5]]",
+    "constraints": ["JavaScript only", "No external packages", "Print exactly one line"],
+    "timeLimitSeconds": 900,
+    "estimatedMinutes": 8,
+    "subSkills": ["arrays", "edge-cases"],
+    "initialRating": 1400,
+    "version": 1,
+    "status": "draft",
+    "language": "javascript",
+    "reference": {
+      "kind": "solution",
+      "body": "const fs = require('fs');\nconst lines = fs.readFileSync(0, 'utf8').split('\\n');\nconst values = (lines[0] ?? '').trim();\nconst size = Number((lines[1] ?? '').trim());\nconst nums = values ? values.split(',').map(Number) : [];\nconst out = [];\nfor (let i = 0; i < nums.length; i += size) out.push(nums.slice(i, i + size));\nconsole.log(JSON.stringify(out));",
+      "notes": "The empty-input case is the one most submissions fail: readline returns an empty string, not an empty array."
+    },
+    "tests": [
+      {
+        "category": "example",
+        "name": "five items, size two",
+        "stdin": "1,2,3,4,5\n2",
+        "expectedStdout": "[[1,2],[3,4],[5]]",
+        "hidden": false
+      },
+      {
+        "category": "empty input",
+        "name": "empty list",
+        "stdin": "\n2",
+        "expectedStdout": "[]",
+        "hidden": true
+      },
+      {
+        "category": "boundary",
+        "name": "size larger than list",
+        "stdin": "1,2\n5",
+        "expectedStdout": "[[1,2]]",
+        "hidden": true
+      },
+      {
+        "category": "large input",
+        "name": "ten items, size three",
+        "stdin": "1,2,3,4,5,6,7,8,9,10\n3",
+        "expectedStdout": "[[1,2,3],[4,5,6],[7,8,9],[10]]",
+        "hidden": true
+      }
+    ]
+  },
+  {
+    "slug": "coding-collapse-spaces",
+    "track": "coding",
+    "format": "code",
+    "title": "Normalise whitespace",
+    "prompt": "Read one line from standard input and print it with every run of whitespace collapsed to a single space, leading and trailing whitespace removed, and nothing else changed. Preserve letter case and punctuation.",
+    "given": "Input\n  a   b  c \n\nOutput\na b c",
+    "constraints": ["Python only", "Standard library only", "Read input from stdin"],
+    "timeLimitSeconds": 600,
+    "estimatedMinutes": 5,
+    "subSkills": ["strings", "edge-cases"],
+    "initialRating": 1300,
+    "version": 1,
+    "status": "draft",
+    "language": "python",
+    "reference": {
+      "kind": "solution",
+      "body": "import sys\n\nline = sys.stdin.readline().rstrip('\\n')\nprint(' '.join(line.split()))",
+      "notes": "str.split() with no argument is the whole problem; a regex is more code for the same result."
+    },
+    "tests": [
+      {
+        "category": "example",
+        "name": "inner runs collapsed",
+        "stdin": "  a   b  c ",
+        "expectedStdout": "a b c",
+        "hidden": false
+      },
+      {
+        "category": "empty input",
+        "name": "whitespace only",
+        "stdin": "     ",
+        "expectedStdout": "",
+        "hidden": true
+      },
+      {
+        "category": "mixed whitespace",
+        "name": "tabs and newline",
+        "stdin": "one\ttwo   three",
+        "expectedStdout": "one two three",
+        "hidden": true
+      }
+    ]
+  }
+]

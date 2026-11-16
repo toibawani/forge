@@ -3,6 +3,8 @@ import { challengeAttemptSchema } from "@/lib/validations";
 import { scoreSubmission, type Rubric } from "@/lib/scoring";
 import { buildFeedback } from "@/lib/feedback";
 import { assessAttempt } from "@/lib/integrity";
+import { challengeFromRow } from "@/lib/challenge-row";
+import { gradeAttemptWithDeps } from "@/lib/attempt-grading";
 import { hashIp, requestIp } from "@/lib/request-meta";
 import { rateLimit } from "@/lib/rate-limit";
 import { logAuditEvent } from "@/lib/audit-logger";
@@ -100,7 +102,7 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
 
   const { data: challenge, error: challengeError } = await supabase
     .from("challenges")
-    .select("id, category, rubric, is_active")
+    .select("id, category, rubric, is_active, slug, model")
     .eq("id", input.challengeId)
     .eq("is_active", true)
     .maybeSingle();
@@ -125,6 +127,18 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
   // reviewed later. Nothing here rejects the submission.
   const integrity = assessAttempt({ answer: input.answer, seconds: elapsedSeconds });
 
+  // A row carrying a `model` document is graded by the grader its format calls
+  // for. Legacy rows resolve to null and keep rubric-v1, rather than pretending
+  // a rubric that was never written applies to them.
+  const model = challengeFromRow(challenge as Record<string, unknown> | null);
+  const graded = model
+    ? await gradeAttemptWithDeps({ challenge: model, answer: input.answer, elapsedSeconds })
+    : null;
+
+  // Pending means the grader was configured but unavailable: no score is
+  // recorded rather than a substituted one.
+  const score = graded ? graded.score : breakdown.score;
+
   const { data: attempt, error: insertError } = await supabase
     .from("challenge_attempts")
     .insert({
@@ -132,11 +146,24 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
       challenge_id: challenge.id,
       submission: {
         answer: input.answer,
+        // Kept in rubric-v1 shape so the current result page still renders while
+        // the new grader's detail sits alongside it for the Phase 2 redesign.
         scoring: breakdown,
         feedback,
         integrity,
+        grading: graded
+          ? {
+              grader: graded.grader,
+              status: graded.status,
+              plan: graded.plan,
+              score: graded.score,
+              dimensions: graded.dimensions,
+              flags: graded.flags,
+              raw: graded.raw,
+            }
+          : null,
       },
-      score: breakdown.score,
+      score,
       time_spent_seconds: elapsedSeconds,
       status: "completed",
       idempotency_key: input.idempotencyKey ?? null,
@@ -169,6 +196,27 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
     return fail(500, "attempt_failed", "We could not save that attempt. Try again.");
   }
 
+  // The immutable grade row is written after the attempt exists. Best-effort on
+  // purpose: a database that has not applied the Phase 1 function must not lose
+  // the attempt the person just wrote.
+  if (graded && graded.status === "graded" && graded.score !== null) {
+    const { error: gradeError } = await supabase.rpc("record_attempt_grade", {
+      p_attempt_id: attempt.id,
+      p_score: graded.score,
+      p_grader: graded.grader,
+      p_grader_version:
+        graded.grader === "sandbox" ? "sandbox-v1" : graded.grader === "llm" ? "grader-v1" : "rubric-v1",
+      p_rubric_version: graded.grader === "llm" ? "rubric-v1" : null,
+      p_model: graded.grader === "llm" ? (process.env.GRADER_MODEL ?? null) : null,
+      p_dimensions: graded.dimensions,
+      p_flags: graded.flags,
+    });
+
+    if (gradeError) {
+      logger.warn("Grade row not written", { code: gradeError.code }, user.id, requestId);
+    }
+  }
+
   // The streak trigger has just run; read it back so the result page can show
   // the new state without a second round trip.
   const { data: streak } = await supabase
@@ -183,7 +231,9 @@ export const POST = apiRoute(async ({ request, supabase, user, requestId, profil
     resourceId: attempt.id,
     details: {
       challengeId: challenge.id,
-      score: breakdown.score,
+      score,
+      grader: graded?.grader ?? "rubric-v1",
+      gradingStatus: graded?.status ?? "graded",
       integrityFlags: integrity.flags,
     },
     ipHash,
