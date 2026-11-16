@@ -5,6 +5,8 @@ import { getServerUser } from "@/lib/supabase/server";
 import { buttonStyles, eyebrowStyles } from "@/components/ui/styles";
 import { minutesLabel, parseRubric, recommendNext, scoreBand, skillLabel } from "@/lib/challenges";
 import { benchmarkFor } from "@/lib/benchmark";
+import { challengeFromRow } from "@/lib/challenge-row";
+import { compareAnswer, highestLeverageFix } from "@/lib/answer-diff";
 import { buildFeedback, type AttemptFeedback, type FeedbackDimension } from "@/lib/feedback";
 import {
   nextMilestone,
@@ -25,6 +27,25 @@ type StoredScoring = {
   version?: string;
   signals?: { completeness?: number; structure?: number; specificity?: number };
   notes?: string[];
+};
+
+/**
+ * The grader's own output, stored alongside the attempt. `pending` means the
+ * grader was configured but unavailable, and the page must say so rather than
+ * render a substituted score.
+ */
+type StoredGrading = {
+  grader?: "sandbox" | "llm" | "rubric-v1";
+  status?: "graded" | "pending";
+  plan?: { reason?: string };
+  dimensions?: Array<{
+    id: string;
+    label?: string;
+    score: number;
+    maxScore?: number;
+    evidence?: string;
+  }>;
+  flags?: string[];
 };
 
 type AttemptRowWithCategory = {
@@ -97,7 +118,7 @@ export default async function AttemptResultPage({
   const { data: attempt } = await supabase
     .from("challenge_attempts")
     .select(
-      "id, challenge_id, score, practice_date, created_at, time_spent_seconds, submission, challenges(title, slug, category, difficulty, rubric)"
+      "id, challenge_id, score, practice_date, created_at, time_spent_seconds, submission, challenges(title, slug, category, difficulty, rubric, model)"
     )
     .eq("id", attemptId)
     .eq("user_id", user.id)
@@ -140,6 +161,7 @@ export default async function AttemptResultPage({
     answer?: string;
     scoring?: StoredScoring;
     feedback?: unknown;
+    grading?: StoredGrading | null;
   };
   const scoring = submission.scoring;
   const signals = {
@@ -147,6 +169,15 @@ export default async function AttemptResultPage({
     structure: scoring?.signals?.structure ?? 0,
     specificity: scoring?.signals?.specificity ?? 0,
   };
+
+  const grading = submission.grading ?? null;
+
+  // The reference answer only exists for rows carrying a Phase 1 model document.
+  const challengeDoc = challengeFromRow(challengeRow as Record<string, unknown> | null);
+  const referenceAnswer =
+    challengeDoc?.reference?.kind === "answer" ? challengeDoc.reference.body : null;
+  const comparison =
+    submission.answer && referenceAnswer ? compareAnswer(submission.answer, referenceAnswer) : null;
 
   const storedFeedback = parseFeedback(submission.feedback);
   const feedback =
@@ -163,6 +194,10 @@ export default async function AttemptResultPage({
   const score = attempt.score as number | null;
   const benchmark = benchmarkFor(score, statsRow);
   const band = scoreBand(score);
+  const leverageFix = highestLeverageFix({
+    dimensions: grading?.dimensions,
+    focus: feedback?.focus ?? null,
+  });
 
   const allRows = (attemptsResult.data ?? []) as AttemptRowWithCategory[];
 
@@ -291,6 +326,35 @@ export default async function AttemptResultPage({
                   {benchmark.text}
                 </p>
               ) : null}
+
+              {grading?.status === "pending" ? (
+                <p className="mt-3 max-w-md rounded border border-accent/40 bg-accent/[0.06] px-3 py-2 text-xs leading-relaxed text-foreground">
+                  The answer is saved, but it was not scored:{" "}
+                  {grading.grader === "sandbox" ? "the code sandbox" : "the rubric grader"} was
+                  unavailable. No score is shown rather than a substituted one.
+                </p>
+              ) : null}
+
+              {grading?.dimensions && grading.dimensions.length > 0 ? (
+                <div className="mt-4 max-w-md border-t border-card-border pt-3">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                    {grading.grader === "sandbox" ? "Tests by category" : "Rubric dimensions"}
+                  </p>
+                  <dl className="mt-2 space-y-1.5">
+                    {grading.dimensions.map((dimension) => (
+                      <div key={dimension.id} className="flex items-baseline justify-between gap-4">
+                        <dt className="text-xs text-muted-foreground">
+                          {dimension.label ?? dimension.id}
+                        </dt>
+                        <dd className="shrink-0 font-mono text-[11px] tabular-nums text-foreground">
+                          {dimension.score}
+                          {typeof dimension.maxScore === "number" ? `/${dimension.maxScore}` : ""}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              ) : null}
             </div>
 
             <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-right sm:grid-cols-1">
@@ -366,10 +430,88 @@ export default async function AttemptResultPage({
           </section>
         </div>
 
-        {feedback ? (
+        {leverageFix ? (
           <section className="mt-6 rounded border border-primary/25 bg-primary/[0.04] p-6">
-            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Focus for next time</p>
-            <p className="mt-2 text-sm leading-relaxed text-foreground">{feedback.focus}</p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+              Focus for next time
+            </p>
+            <p className="mt-2 text-sm font-medium text-foreground">{leverageFix.title}</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{leverageFix.detail}</p>
+            {feedback?.focus && leverageFix.title !== "The one thing to change" ? (
+              <p className="mt-3 border-t border-primary/20 pt-3 text-xs leading-relaxed text-muted">
+                {feedback.focus}
+              </p>
+            ) : null}
+          </section>
+        ) : null}
+
+        {/* Only after submit, and only when a reference answer exists. */}
+        {comparison && referenceAnswer && submission.answer ? (
+          <section className="mt-6 rounded border border-card-border bg-card p-6">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                Your answer next to the reference
+              </h2>
+              <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">
+                {comparison.overlapPercent}% of reference points covered
+              </p>
+            </div>
+
+            <div className="mt-4 grid gap-5 md:grid-cols-2">
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Yours</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                  {submission.answer}
+                </p>
+              </div>
+              <div>
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">Reference</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                  {referenceAnswer}
+                </p>
+              </div>
+            </div>
+
+            {comparison.missingSpecifics.length > 0 ? (
+              <div className="mt-5 border-t border-card-border pt-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                  In the reference, not in yours
+                </p>
+                <ul className="mt-2 flex flex-wrap gap-2">
+                  {comparison.missingSpecifics.map((specific) => (
+                    <li
+                      key={specific}
+                      className="rounded border border-card-border px-2 py-1 font-mono text-[11px] text-foreground"
+                    >
+                      {specific}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {comparison.unmatchedReference.length > 0 ? (
+              <div className="mt-4">
+                <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted">
+                  Reference points with no counterpart
+                </p>
+                <ul className="mt-2 space-y-2">
+                  {comparison.unmatchedReference.map((sentence) => (
+                    <li
+                      key={sentence}
+                      className="border-l-2 border-accent/40 pl-3 text-sm leading-relaxed text-muted-foreground"
+                    >
+                      {sentence}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            <p className="mt-5 border-t border-card-border pt-3 text-xs leading-relaxed text-muted">
+              The reference is one good answer, not the only one. A missing point is a difference of
+              approach, not proof the answer is wrong.
+            </p>
           </section>
         ) : null}
 
