@@ -7,7 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test src/lib/scoring.test.ts src/lib/feedback.test.ts src/lib/progression.test.ts src/lib/challenges.test.ts src/lib/recruiter.test.ts src/lib/validations.test.ts src/lib/review.test.ts src/lib/benchmark.test.ts src/lib/integrity.test.ts src/lib/email-content.test.ts src/lib/palette.test.ts"
+    "typecheck": "tsc --noEmit",
+    "env:check": "node --experimental-strip-types scripts/check-env.mts",
+    "db:apply": "bash scripts/db-apply.sh",
+    "db:seed": "bash scripts/db-apply.sh --seed",
+    "test:rls": "bash scripts/db-apply.sh --rls",
+    "e2e": "playwright test",
+    "test": "node --experimental-strip-types --test src/lib/env-schema.test.ts src/lib/scoring.test.ts src/lib/feedback.test.ts src/lib/progression.test.ts src/lib/challenges.test.ts src/lib/recruiter.test.ts src/lib/validations.test.ts src/lib/review.test.ts src/lib/benchmark.test.ts src/lib/integrity.test.ts src/lib/email-content.test.ts src/lib/palette.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
@@ -18,6 +24,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

@@ -8,6 +8,38 @@ Recruiters get a signal they can trust. People who practise get a habit that imp
 
 ---
 
+## Run it locally
+
+Under ten minutes from a clean clone, assuming Node 22.6+.
+
+```bash
+npm install
+cp .env.example .env.local      # then fill in the Supabase values
+npm run env:check               # says what is missing, prints no secrets
+npm run db:apply -- --seed      # schema.sql + demo data (needs DATABASE_URL)
+npm run dev
+```
+
+Create the Supabase project first and paste three values from Project settings → API:
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and the service-role key.
+Add the database connection string from Project settings → Database if you want to run
+the CLI commands. `npm run db:apply` uses `psql`; without it, paste `supabase/schema.sql`
+into the Supabase SQL editor.
+
+Checks:
+
+```bash
+npm test          # unit tests (pure logic, no database)
+npm run typecheck # tsc --noEmit (add this script if absent)
+npm run build
+npm run test:rls  # RLS assertions; needs DATABASE_URL
+npm run e2e       # Playwright smoke test; needs a seeded database
+```
+
+The app runs without a database on purpose: marketing, legal and `/status` pages work, and
+every data route answers 503 with a clear code rather than a stack trace. In production a
+missing required variable fails at boot instead — see `instrumentation.ts`.
+
 ## The problem
 
 AI-polished resumes and staged portfolios have broken traditional hiring signals. One-off skill
