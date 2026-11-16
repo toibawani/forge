@@ -67,22 +67,23 @@ surface should be.
 management, the JSON loader is replaced by a table read and the file becomes the
 seed — the schema and IDs are already stable enough for that.
 
-## Grading adapters are not yet wired into the attempt route
+## The attempt route picks its grader from the challenge format
 
-**Decision.** `gradeInSandbox` and `gradeRubric` exist, are tested, and are
-called by `challenge:validate` and `challenge:calibrate`. The existing attempt
-endpoint still uses the deterministic rubric-v1 scorer.
+**Decision.** `resolveGradingPlan` chooses sandbox, rubric or rubric-v1 purely
+from the format and what is configured. A row's `model` document decides whether
+the new path applies at all: rows without one keep rubric-v1, because inventing
+tests for them would mean scoring against a rubric nobody wrote.
 
-**Why not switch now.** The switch makes every code and SQL submission depend on
-a Judge0 instance that is not provisioned here, and every writing submission
-depend on a model key that is not set. Shipping that unverified would break the
-one path that demonstrably works, and I cannot test it without the two
-credentials.
+**Fallbacks.** A missing `JUDGE0_URL` or `ANTHROPIC_API_KEY` drops to rubric-v1
+and says so in the stored flags (`fallback:sandbox_not_configured`,
+`fallback:grader_not_configured`). A grader that *is* configured but fails does
+not fall back: the attempt is stored with `status: "pending"` and no score. A
+score that silently changed meaning is worse than a score that is late.
 
-**Tradeoff.** Phase 1 is a pipeline plus four draft challenges, not a live
-grading product. The switch is a small, contained change once `JUDGE0_URL` and
-`ANTHROPIC_API_KEY` exist, and the tests around the adapters already describe
-the behaviour the route has to call.
+**Tradeoff.** Two shapes now exist in `submission`: the rubric-v1 breakdown the
+result page renders, and the new grader's detail beside it under `grading`. That
+duplication goes away when the result page is rebuilt in Phase 2; keeping it for
+now means the page cannot break for rows the new grader scored.
 
 ## Hidden tests are removed by construction, not by convention
 

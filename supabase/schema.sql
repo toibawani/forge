@@ -1439,3 +1439,8 @@ drop trigger if exists trg_attempt_grades_immutable on public.attempt_grades;
 create trigger trg_attempt_grades_immutable
   before update or delete on public.attempt_grades
   for each row execute function public.reject_grade_mutation();
+
+-- The full Phase 1 challenge document (tests, reference, rubric dimensions).
+-- Null means the row predates Phase 1 and stays on rubric-v1 grading.
+alter table public.challenges
+  add column if not exists model jsonb;

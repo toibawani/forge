@@ -117,9 +117,11 @@ Grades are immutable rows in `attempt_grades`, written only through a
 security-definer function that checks the caller owns the attempt; a trigger
 refuses updates and deletes.
 
-The attempt endpoint still uses rubric-v1. Switching it to these adapters is a
-small change that needs `JUDGE0_URL` and `ANTHROPIC_API_KEY` to be testable — see
-`docs/decisions.md`.
+The attempt endpoint chooses by format: sandbox for test-graded formats, rubric
+for writing, and rubric-v1 when a key is missing (`fallback:*` is stored in the
+flags). Rows with no `model` document stay on rubric-v1. A configured grader that
+fails mid-run stores the attempt as `pending` with no score rather than
+substituting another grader — see `docs/decisions.md`.
 
 ## Tech stack
 

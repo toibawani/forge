@@ -15,7 +15,7 @@
     "e2e": "playwright test",
     "challenge:validate": "node --experimental-strip-types scripts/challenge-validate.mts",
     "challenge:calibrate": "node --experimental-strip-types scripts/challenge-calibrate.mts",
-    "test": "node --experimental-strip-types --test src/lib/env-schema.test.ts src/lib/scoring.test.ts src/lib/feedback.test.ts src/lib/progression.test.ts src/lib/challenges.test.ts src/lib/recruiter.test.ts src/lib/validations.test.ts src/lib/review.test.ts src/lib/benchmark.test.ts src/lib/integrity.test.ts src/lib/email-content.test.ts src/lib/palette.test.ts src/lib/tracks.test.ts src/lib/challenge-model.test.ts src/lib/sandbox-core.test.ts src/lib/grader/grade-core.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/env-schema.test.ts src/lib/scoring.test.ts src/lib/feedback.test.ts src/lib/progression.test.ts src/lib/challenges.test.ts src/lib/recruiter.test.ts src/lib/validations.test.ts src/lib/review.test.ts src/lib/benchmark.test.ts src/lib/integrity.test.ts src/lib/email-content.test.ts src/lib/palette.test.ts src/lib/tracks.test.ts src/lib/challenge-model.test.ts src/lib/sandbox-core.test.ts src/lib/grader/grade-core.test.ts src/lib/attempt-grading-core.test.ts src/lib/challenge-row.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
