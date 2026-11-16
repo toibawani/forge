@@ -12,6 +12,7 @@
     "db:apply": "bash scripts/db-apply.sh",
     "db:seed": "bash scripts/db-apply.sh --seed",
     "test:rls": "bash scripts/db-apply.sh --rls",
+    "test:timezone": "bash scripts/db-apply.sh --seed --timezone",
     "e2e": "playwright test",
     "challenge:validate": "node --experimental-strip-types scripts/challenge-validate.mts",
     "challenge:calibrate": "node --experimental-strip-types scripts/challenge-calibrate.mts",
